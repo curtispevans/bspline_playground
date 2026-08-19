@@ -91,9 +91,9 @@ def generate_b_spline_trajectory(C, M, d, num_points=200):
 # -------------------------------------------------------------
 # 4. Plotting Setup
 # -------------------------------------------------------------
-M, d = 7, 2
+M, d = 10, 2
 n = M + d
-a, epsilon = 1, 0.01
+a, epsilon = 5, 0.01
 
 # Define Start state (all zeros) and End state (e.g. linear ramp from 0 to 2)
 start_vec = np.ones(n) * 100
@@ -103,7 +103,7 @@ end_vec = np.zeros(n)
 c0, V, A_tilde, b_tilde = get_analytical_representation(M, d, a, epsilon, start_vec, end_vec)
 
 # Generate several distinct valid C matrices
-num_trajectories = 5
+num_trajectories = 100
 plt.figure(figsize=(10, 6))
 
 colors = plt.cm.viridis(np.linspace(0, 1, num_trajectories))
