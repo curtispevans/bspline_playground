@@ -212,7 +212,7 @@ def get_analytical_representation_2D(M, d, a, j_max, epsilon, start, end):
     
     return c0, V, A_tilde, b_tilde
 
-def get_analytical_representation_2D_no_jerk(M, d, a, epsilon, start, end):
+def get_analytical_representation_2D_no_jerk(M, d, a, num_epsilon, epsilon, start, end):
     n = M + d
     N = 2 * n  # c_vec[:n] is X, c_vec[n:] is Y
     
@@ -243,13 +243,19 @@ def get_analytical_representation_2D_no_jerk(M, d, a, epsilon, start, end):
     # X acceleration (limit = a[0])
     for j in range(num_diff2):
         A_diff2[j, j:j+3] = [1.0, -2.0, 1.0]
-        b_diff2[j] = a[0] - epsilon
+        if j < num_epsilon:  # Apply tighter limit for the first few control points
+            b_diff2[j] = epsilon*0
+        else:
+            b_diff2[j] = a[0] - epsilon
 
     # Y acceleration (limit = a[1])
     for j in range(num_diff2):
         idx = num_diff2 + j
         A_diff2[idx, n + j : n + j + 3] = [1.0, -2.0, 1.0]
-        b_diff2[idx] = a[1] - epsilon
+        if j < num_epsilon:  # Apply tighter limit for the first few control points
+            b_diff2[idx] = epsilon*0
+        else:
+            b_diff2[idx] = a[1] - epsilon
 
     # -------------------------------------------------------------
     # 4. Stack Constraints
@@ -460,8 +466,8 @@ def sample_convex_combination(c0, V, A_tilde, b_tilde, n, num_vertices=6, seed=N
         raise ValueError("Could not find valid boundary vertices.")
 
     # 2. Blend vertices using Dirichlet distribution (guarantees sum = 1, w_i >= 0)
-    weights = np.random.dirichlet(np.ones(len(vertices)))
-    # weights = np.random.dirichlet(np.full(len(vertices), 0.3))
+    # weights = np.random.dirichlet(np.ones(len(vertices)))
+    weights = np.random.dirichlet(np.full(len(vertices), 0.3))
     # weights = np.random.dirichlet(np.full(len(vertices), 5))
     interior_alpha = sum(w * v for w, v in zip(weights, vertices))
     
@@ -492,11 +498,12 @@ def generate_b_spline_trajectory(C, M, d, num_points=200):
 # -------------------------------------------------------------
 # 4. Plotting Setup
 # -------------------------------------------------------------
-M, d = 15, 3
+M, d = 8, 3
 n = M + d
-a = np.array([.5, 5.])
+a = np.array([0.2, 50.])
 j_max = np.array([1, 6])
-epsilon = 0.1
+epsilon = 0.01
+num_epsilon = 5  # Number of initial control points with tighter constraints
 
 
 # start_vec = np.ones(n) * 1000
@@ -508,10 +515,10 @@ end_vec = np.array([0.0, 0.0])
 
 
 # c0, V, A_tilde, b_tilde = get_analytical_representation_2D(M, d, a, j_max, epsilon, start_vec, end_vec)
-c0, V, A_tilde, b_tilde = get_analytical_representation_2D_no_jerk(M, d, a, epsilon, start_vec, end_vec)
+c0, V, A_tilde, b_tilde = get_analytical_representation_2D_no_jerk(M, d, a, num_epsilon, epsilon, start_vec, end_vec)
 
 # Generate several distinct valid C matrices
-num_trajectories = 500
+num_trajectories = 100
 plt.figure(figsize=(10, 6))
 
 colors = plt.cm.viridis(np.linspace(0, 1, num_trajectories))
