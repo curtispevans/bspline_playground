@@ -6,142 +6,17 @@ import sys
 sys.path.append('../bsplines_library/build')
 import bspline_module
 
-# -------------------------------------------------------------
-# 1. Analytical System Construction
-# -------------------------------------------------------------
-# def get_analytical_representation(M, d, a, epsilon, start, end):
-#     n = M + d
-#     N = n * n
-    
-#     # Equality Constraints: C[:, 0] == start, C[:, -1] == end
-#     A_eq = np.zeros((2 * n, N))
-#     b_eq = np.concatenate([start.ravel(), end.ravel()])
-    
-#     for row in range(n):
-#         A_eq[row, row * n] = 1.0                # First column C[:, 0]
-#         A_eq[n + row, row * n + (n - 1)] = 1.0  # Last column C[:, -1]
+def make_D_M_d(M, d):
+    first_last = [d/i for i in range(1,d)]
+    middle = [1]*(M-d+1)
+    diag_elements = first_last + middle + first_last[::-1]
+    D_bar = np.diag(diag_elements)
+    zero_row = np.zeros((1, M+d-1))
+    D_M_d = -np.block([[D_bar], [zero_row]]) + np.block([[zero_row], [D_bar]])
+    return D_M_d
 
-#     c0 = np.linalg.lstsq(A_eq, b_eq, rcond=None)[0]
-#     V = null_space(A_eq)
-    
-#     # Second-difference inequalities
-#     num_diff_cols = n - 2
-#     # num_diff_cols = n - 1
-#     # num_diff_cols = n - 3
-#     num_ineqs = n * num_diff_cols
-#     A_diff = np.zeros((num_ineqs, N))
-    
-#     idx = 0
-#     for i in range(n):
-#         for j in range(num_diff_cols):
-#             A_diff[idx, i * n + j] = 1.0
-#             A_diff[idx, i * n + (j + 1)] = -2.0
-#             A_diff[idx, i * n + (j + 2)] = 1.0
 
-#             # A_diff[idx, i * n + j] = 1.0
-#             # A_diff[idx, i * n + (j + 1)] = -1.0
-
-#             # A_diff[idx, i * n + j] = -1.0
-#             # A_diff[idx, i * n + (j + 1)] = 3.0
-#             # A_diff[idx, i * n + (j + 2)] = -3.0
-#             # A_diff[idx, i * n + (j + 3)] = 1.0
-            
-#             idx += 1
-
-#     b_diff = np.zeros(num_ineqs)
-#     for i in range(n):
-#         for j in range(num_diff_cols):
-#             # Apply larger bound if evaluating y-coordinate control points
-#             b_diff[i * num_diff_cols + j] = (
-#                 (a[0] - epsilon) if i < n // 2 else (a[1] - epsilon)
-#             )
-#     A_ub = np.vstack([A_diff, -A_diff])
-#     b_ub = np.concatenate([b_diff, b_diff])
-    
-#     A_tilde = A_ub @ V
-#     b_tilde = b_ub - A_ub @ c0
-    
-#     return c0, V, A_tilde, b_tilde
-
-# def get_analytical_representation(M, d, a, j_max, epsilon, start, end):
-#     n = M + d
-#     N = n * n
-    
-#     # -------------------------------------------------------------
-#     # 1. Equality Constraints: C[:, 0] == start, C[:, -1] == end
-#     # -------------------------------------------------------------
-#     A_eq = np.zeros((2 * n, N))
-#     b_eq = np.concatenate([start.ravel(), end.ravel()])
-    
-#     for row in range(n):
-#         A_eq[row, row * n] = 1.0                # First column C[:, 0]
-#         A_eq[n + row, row * n + (n - 1)] = 1.0  # Last column C[:, -1]
-
-#     c0 = np.linalg.lstsq(A_eq, b_eq, rcond=None)[0]
-#     V = null_space(A_eq)
-    
-#     # -------------------------------------------------------------
-#     # 2. Second-Difference Inequalities (Acceleration Limits)
-#     # -------------------------------------------------------------
-#     num_diff2_cols = n - 2
-#     num_ineqs2 = n * num_diff2_cols
-#     A_diff2 = np.zeros((num_ineqs2, N))
-    
-#     idx = 0
-#     for i in range(n):
-#         for j in range(num_diff2_cols):
-#             A_diff2[idx, i * n + j] = 1.0
-#             A_diff2[idx, i * n + (j + 1)] = -2.0
-#             A_diff2[idx, i * n + (j + 2)] = 1.0
-#             idx += 1
-
-#     b_diff2 = np.zeros(num_ineqs2)
-#     for i in range(n):
-#         for j in range(num_diff2_cols):
-#             b_diff2[i * num_diff2_cols + j] = (
-#                 (a[0] - epsilon) if i < n // 2 else (a[1] - epsilon)
-#             )
-
-#     # -------------------------------------------------------------
-#     # 3. Third-Difference Inequalities (Jerk Limits)
-#     # -------------------------------------------------------------
-#     num_diff3_cols = n - 3
-#     num_ineqs3 = n * num_diff3_cols
-#     A_diff3 = np.zeros((num_ineqs3, N))
-    
-#     idx = 0
-#     for i in range(n):
-#         for j in range(num_diff3_cols):
-#             A_diff3[idx, i * n + j] = -1.0
-#             A_diff3[idx, i * n + (j + 1)] = 3.0
-#             A_diff3[idx, i * n + (j + 2)] = -3.0
-#             A_diff3[idx, i * n + (j + 3)] = 1.0
-#             idx += 1
-
-#     b_diff3 = np.zeros(num_ineqs3)
-#     for i in range(n):
-#         for j in range(num_diff3_cols):
-#             b_diff3[i * num_diff3_cols + j] = (
-#                 (j_max[0] - epsilon) if i < n // 2 else (j_max[1] - epsilon)
-#             )
-
-#     # -------------------------------------------------------------
-#     # 4. Stack Acceleration and Jerk Constraints
-#     # -------------------------------------------------------------
-#     # Upper/lower bounds for acceleration and jerk combined
-#     A_diff = np.vstack([A_diff2, A_diff3])
-#     b_diff = np.concatenate([b_diff2, b_diff3])
-
-#     A_ub = np.vstack([A_diff, -A_diff])
-#     b_ub = np.concatenate([b_diff, b_diff])
-    
-#     # Transform to reduced basis coordinates (alpha space)
-#     A_tilde = A_ub @ V
-#     b_tilde = b_ub - A_ub @ c0
-    
-#     return c0, V, A_tilde, b_tilde
-
-def get_analytical_representation_2D(M, d, a, j_max, epsilon, start, end):
+def get_analytical_representation_2D(M, d, a, num_epsilon, epsilon, start, end):
     n = M + d
     N = 2 * n  # c_vec[:n] is X, c_vec[n:] is Y
     
@@ -167,77 +42,16 @@ def get_analytical_representation_2D(M, d, a, j_max, epsilon, start, end):
     # -------------------------------------------------------------
     num_diff2 = n - 2
     A_diff2 = np.zeros((2 * num_diff2, N))
-    b_diff2 = np.zeros(2 * num_diff2)
-    
-    # X acceleration (limit = a[0])
-    for j in range(num_diff2):
-        A_diff2[j, j:j+3] = [1.0, -2.0, 1.0]
-        b_diff2[j] = a[0] - epsilon
-
-    # Y acceleration (limit = a[1])
-    for j in range(num_diff2):
-        idx = num_diff2 + j
-        A_diff2[idx, n + j : n + j + 3] = [1.0, -2.0, 1.0]
-        b_diff2[idx] = a[1] - epsilon
-
-    # -------------------------------------------------------------
-    # 3. Jerk Constraints (Third Differences)
-    # -------------------------------------------------------------
-    num_diff3 = n - 3
-    A_diff3 = np.zeros((2 * num_diff3, N))
-    b_diff3 = np.zeros(2 * num_diff3)
-    
-    # X jerk (limit = j_max[0])
-    for j in range(num_diff3):
-        A_diff3[j, j:j+4] = [-1.0, 3.0, -3.0, 1.0]
-        b_diff3[j] = j_max[0] - epsilon
-
-    # Y jerk (limit = j_max[1])
-    for j in range(num_diff3):
-        idx = num_diff3 + j
-        A_diff3[idx, n + j : n + j + 4] = [-1.0, 3.0, -3.0, 1.0]
-        b_diff3[idx] = j_max[1] - epsilon
-
-    # -------------------------------------------------------------
-    # 4. Stack Constraints
-    # -------------------------------------------------------------
-    A_diff = np.vstack([A_diff2, A_diff3])
-    b_diff = np.concatenate([b_diff2, b_diff3])
-
-    A_ub = np.vstack([A_diff, -A_diff])
-    b_ub = np.concatenate([b_diff, b_diff])
-    
-    A_tilde = A_ub @ V
-    b_tilde = b_ub - A_ub @ c0
-    
-    return c0, V, A_tilde, b_tilde
-
-def get_analytical_representation_2D_no_jerk(M, d, a, num_epsilon, epsilon, start, end):
-    n = M + d
-    N = 2 * n  # c_vec[:n] is X, c_vec[n:] is Y
-    
-    # -------------------------------------------------------------
-    # 1. Equality Constraints: C[0, 0]=x_start, C[0, -1]=x_end, etc.
-    # -------------------------------------------------------------
-    A_eq = np.zeros((4, N))
-    b_eq = np.array([start[0], end[0], start[1], end[1]])
-    
-    # X start & end (indices 0 and n-1)
-    A_eq[0, 0] = 1.0          
-    A_eq[1, n - 1] = 1.0      
-    
-    # Y start & end (indices n and 2n-1)
-    A_eq[2, n] = 1.0          
-    A_eq[3, 2 * n - 1] = 1.0  
-
-    c0 = np.linalg.lstsq(A_eq, b_eq, rcond=None)[0]
-    V = null_space(A_eq)
-    
-    # -------------------------------------------------------------
-    # 2. Acceleration Constraints (Second Differences)
-    # -------------------------------------------------------------
-    num_diff2 = n - 2
-    A_diff2 = np.zeros((2 * num_diff2, N))
+    print(f"A_diff2 shape {A_diff2.shape}")
+    # Making it for uniform clamped control points
+    D_M_d = make_D_M_d(M, d)
+    D_M_d1 = make_D_M_d(M, d-1)
+    D_tmp = D_M_d @ D_M_d1
+    D_X = D_tmp.T
+    D_Y = D_tmp.T
+    D = np.block([[D_X, np.zeros((num_diff2, n))],
+                  [np.zeros((num_diff2, n)), D_Y],])  
+    print(f"D shape {D.shape}")
     b_diff2 = np.zeros(2 * num_diff2)
     
     # X acceleration (limit = a[0])
@@ -261,13 +75,17 @@ def get_analytical_representation_2D_no_jerk(M, d, a, num_epsilon, epsilon, star
     # 4. Stack Constraints
     # -------------------------------------------------------------
 
-    A_ub = np.vstack([A_diff2, -A_diff2])
+    # A_ub = np.vstack([A_diff2, -A_diff2])
+    A_ub = np.vstack([D, -D])
     b_ub = np.concatenate([b_diff2, b_diff2])
-    
+
+    print(f"A_ub shape {A_ub.shape},V shape {V.shape}, b_ub shape {b_ub.shape}")
     A_tilde = A_ub @ V
     b_tilde = b_ub - A_ub @ c0
     
     return c0, V, A_tilde, b_tilde
+
+
 # -------------------------------------------------------------
 # 2. Sampler: Finds random valid C matrices within the polytope
 # -------------------------------------------------------------
@@ -373,68 +191,6 @@ def sample_diverse_C_2D(c0, V, A_tilde, b_tilde, n, seed=None):
         
     return C.value
 
-def sample_hit_and_run(c0, V, A_tilde, b_tilde, n, num_samples=30, burn_in=200, seed=None):
-    if seed is not None:
-        np.random.seed(seed)
-        
-    k = V.shape[1]
-    
-    # 1. Find an initial strictly interior point using Chebyshev center
-    alpha_var = cp.Variable(k)
-    r = cp.Variable()
-    
-    # Normalize rows of A_tilde for accurate ball radius r
-    norms = np.linalg.norm(A_tilde, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    A_norm = A_tilde / norms
-    
-    prob = cp.Problem(cp.Maximize(r), [A_norm @ alpha_var + r <= b_tilde / norms.ravel()])
-    prob.solve()
-    
-    current_alpha = alpha_var.value.copy()
-    
-    # 2. Burn-in steps to lose initial bias
-    for _ in range(burn_in):
-        direction = np.random.randn(k)
-        direction /= np.linalg.norm(direction)
-        
-        # Calculate line-search step limits: A_tilde (alpha + t * dir) <= b_tilde
-        Ad = A_tilde @ direction
-        slack = b_tilde - A_tilde @ current_alpha
-        
-        pos_mask = Ad > 1e-9
-        neg_mask = Ad < -1e-9
-        
-        t_max = np.min(slack[pos_mask] / Ad[pos_mask]) if np.any(pos_mask) else 100.0
-        t_min = np.max(slack[neg_mask] / Ad[neg_mask]) if np.any(neg_mask) else -100.0
-        
-        if t_max > t_min:
-            t = np.random.uniform(t_min, t_max)
-            current_alpha += t * direction
-
-    # 3. Collect diverse interior samples
-    trajectories = []
-    for _ in range(num_samples):
-        direction = np.random.randn(k)
-        direction /= np.linalg.norm(direction)
-        
-        Ad = A_tilde @ direction
-        slack = b_tilde - A_tilde @ current_alpha
-        
-        pos_mask = Ad > 1e-9
-        neg_mask = Ad < -1e-9
-        
-        t_max = np.min(slack[pos_mask] / Ad[pos_mask]) if np.any(pos_mask) else 100.0
-        t_min = np.max(slack[neg_mask] / Ad[neg_mask]) if np.any(neg_mask) else -100.0
-        
-        if t_max > t_min:
-            t = np.random.uniform(t_min, t_max)
-            current_alpha += t * direction
-            
-        c_vec = c0 + V @ current_alpha
-        trajectories.append(np.vstack([c_vec[:n], c_vec[n:]]))
-        
-    return trajectories
 
 def sample_convex_combination(c0, V, A_tilde, b_tilde, n, num_vertices=6, seed=None):
     if seed is not None:
@@ -498,24 +254,17 @@ def generate_b_spline_trajectory(C, M, d, num_points=200):
 # -------------------------------------------------------------
 # 4. Plotting Setup
 # -------------------------------------------------------------
-M, d = 8, 3
+M, d = 15, 2
 n = M + d
-a = np.array([0.2, 50.])
+a = np.array([0.1, 25.])
 j_max = np.array([1, 6])
 epsilon = 0.01
-num_epsilon = 5  # Number of initial control points with tighter constraints
-
-
-# start_vec = np.ones(n) * 1000
-# start_vec[1:] = 0.0  # Start at 0 for the first state
-# end_vec = np.zeros(n)
+num_epsilon = 8  # Number of initial control points with tighter constraints
 
 start_vec = np.array([1000.0, 0.0])
 end_vec = np.array([0.0, 0.0])
 
-
-# c0, V, A_tilde, b_tilde = get_analytical_representation_2D(M, d, a, j_max, epsilon, start_vec, end_vec)
-c0, V, A_tilde, b_tilde = get_analytical_representation_2D_no_jerk(M, d, a, num_epsilon, epsilon, start_vec, end_vec)
+c0, V, A_tilde, b_tilde = get_analytical_representation_2D(M, d, a, num_epsilon, epsilon, start_vec, end_vec)
 
 # Generate several distinct valid C matrices
 num_trajectories = 100
@@ -523,14 +272,12 @@ plt.figure(figsize=(10, 6))
 
 colors = plt.cm.viridis(np.linspace(0, 1, num_trajectories))
 
-# control_matrices = sample_hit_and_run(c0, V, A_tilde, b_tilde, n, num_samples=num_trajectories, burn_in=200, seed=42)
 
 for idx in range(num_trajectories):
     # C_sample = sample_valid_C(c0, V, A_tilde, b_tilde, n, seed=idx * 10)
     # C_sample = sample_diverse_C(c0, V, A_tilde, b_tilde, n, seed=idx * 10)
     C_sample = sample_convex_combination(c0, V, A_tilde, b_tilde, n, num_vertices=6, seed=idx * 10)
     # C_sample = sample_diverse_C_2D(c0, V, A_tilde, b_tilde, n, seed=idx * 10)
-    # C_sample = sample_hit_and_run(c0, V, A_tilde, b_tilde, n, num_samples=1, burn_in=200, seed=idx * 10)[0]
     # C_sample = control_matrices[idx]
     t, traj = generate_b_spline_trajectory(C_sample, M, d)
     
