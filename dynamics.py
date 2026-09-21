@@ -5,7 +5,7 @@ import params as P
 
 
 class SimpleDynamics:
-    def __init__(self, x0: NDArray[np.float64] = np.zeros(5)):
+    def __init__(self, x0: NDArray[np.float64] = np.zeros(3), v0 : float = 0.0):
         """
         Initialize the simple dynamics model.
         Initial state vector [px, py, heading, vx, vy]
@@ -17,6 +17,7 @@ class SimpleDynamics:
         self.max_g = P.max_g
         self.max_acceleration = P.max_acceleration
         self.Ts = P.Ts
+        self.v0 = v0
 
     def update(self, u: NDArray[np.float64]) -> NDArray[np.float64]:
         """
@@ -61,14 +62,13 @@ class SimpleDynamics:
         Returns:
             xdot (NDArray[np.float64]): State derivatives.
         """
-        px, py, heading, vx, vy = x
+        px, py, heading = x
         [a_normal] = np.clip(u, -self.max_acceleration, self.max_acceleration)
 
         xdot = np.empty_like(x)
-        xdot[0] = vx
-        xdot[1] = vy
-        xdot[2] = a_normal / np.sqrt(vx**2 + vy**2)
-        xdot[3] = -a_normal * np.sin(heading)
-        xdot[4] = a_normal * np.cos(heading)
+        xdot[0] = self.v0 * np.cos(heading)
+        xdot[1] = self.v0 * np.sin(heading)
+        xdot[2] = a_normal / self.v0
+        
         return xdot
  
