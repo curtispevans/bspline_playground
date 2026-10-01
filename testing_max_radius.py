@@ -3,104 +3,71 @@ import matplotlib.pyplot as plt
 from numpy.typing import NDArray
 from dynamics import SimpleDynamics
 import params as P
+from path_manager import PathManager
 
-def wrap_angle(angle: float) -> float:
-    return (angle + np.pi) % (2 * np.pi) - np.pi
+def compute_trajectory(x0: NDArray[np.float64], target: NDArray[np.float64], tf: float, v0: float) -> NDArray[np.float64]:
+    """
+    Compute the trajectory of the vehicle towards the target.
 
-def compute_control(x_current: NDArray[np.float64], v: float, target: NDArray[np.float64]) -> NDArray[np.float64]:
-    a_max = P.max_acceleration
-    px, py, heading = x_current
-    R_min = (v**2) / a_max
+    Args:
+        vehicle (SimpleDynamics): The vehicle dynamics model.
+        path_manager (PathManager): The path manager for Dubins path.
+        target (NDArray[np.float64]): Target position [px, py, heading].
+        tf (float): Final time for simulation.
 
-    dx = target[0] - px
-    dy = target[1] - py
-    dist_to_target = np.hypot(dx, dy)
-
-    # 1. INSIDE THE CIRCLE: Execute max acceleration turn
-    if dist_to_target <= R_min:
-        # Determine whether left (+a_max) or right (-a_max) turn curves into target
-        cross_prod = np.cos(heading) * dy - np.sin(heading) * dx
-        turn_sign = 1.0 if cross_prod >= 0 else -1.0
-        return np.array([turn_sign * a_max])
-
-    # 2. OUTSIDE THE CIRCLE: Aim for the tangent approach path
-    # Angle offset to hit the circle perimeter tangentially
-    offset_angle = np.arcsin(np.clip(R_min / dist_to_target, -1.0, 1.0))
-    direct_angle = np.arctan2(dy, dx)
-
-    # Pick the tangent line closest to current heading
-    target_heading_left = direct_angle + offset_angle
-    target_heading_right = direct_angle - offset_angle
-
-    err_left = abs(wrap_angle(target_heading_left - heading))
-    err_right = abs(wrap_angle(target_heading_right - heading))
-
-    chosen_heading = target_heading_left if err_left < err_right else target_heading_right
-    heading_error = wrap_angle(chosen_heading - heading)
-
-    # Straight line guidance outside the circle
-    k_p = 3.0
-    an = np.clip(k_p * v * heading_error, -a_max, a_max)
-    return np.array([an])
-
-def run_trajectory(vechicle: SimpleDynamics, c: NDArray[np.float64]) -> NDArray[np.float64]:
-    t0 = 0
-    tf = 60
+    Returns:
+        NDArray[np.float64]: Array of states over time.
+    """
+    vehicle = SimpleDynamics(x0, v0=v0)
+    R = v0**2 / P.max_acceleration
+    path_manager = PathManager(R=R, p_s=x0[:2], chi_s=x0[2], p_e=target[:2], chi_e=target[2])
     t = 0
     states = [vehicle.x]
 
-    while t < tf:
-        u = compute_control(vehicle.x, vehicle.v0, c)
+    while t < tf and not path_manager.done:
+        u = path_manager.update(vehicle)
         x = vehicle.update(u)
         t += P.Ts
         states.append(x)
-        if np.allclose(x[:2], target, atol=10.0):
-            print(f"Reached target at time: {t:.2f} s")
-            break
 
+    print(f"Reached target at time: {t:.2f} s")
     return np.array(states)
 
-x0 = np.array([2000, 0, np.pi])
+
+x0 = np.array([3500, 0, np.pi])
 v0 = 50
-vehicle = SimpleDynamics(x0, v0)
-R = v0**2 / P.max_acceleration
-target = np.array([0, 0])  # Target position at the origin
-gamma = 15.0 * np.pi/180.0  # 15 degrees in radians
-c = R * np.array([np.cos(gamma), np.sin(gamma)])  # Point on the circle at 15 degrees
+target = np.array([0, 0, -3*np.pi/4])  # Target position at the origin
 
 t0 = 0
-tf = 60
+tf = 150
 t = 0
 
-
-
 # execute a maximum acceleration maneuver
-u = np.array([P.max_acceleration])
-states = [x0]
+states = []
+final_headings = np.linspace(-np.pi, np.pi, 100)  # Test different final headings]
+for headings in final_headings:
+    target[2] = headings
+    states.append((compute_trajectory(x0, target, tf, v0), headings))
 
+R = v0**2 / P.max_acceleration
 print(f"Max radius of curvature: {R:.2f} m")
 
-states_on_circle = []
-while t < tf:
-    u = compute_control(vehicle.x, vehicle.v0, c)
-    x = vehicle.update(u)
-    t += P.Ts
-    states.append(x)
-    if np.allclose(x[:2], target, atol=10.0):
-        print(f"Reached target at time: {t:.2f} s")
-        break
 
 
-states = np.array(states)
-points = np.linspace(0, 2 * np.pi, 100)
+for state in states[::-1]:
+    state, heading = state
+    plt.plot(state[:, 0], state[:, 1], 'r-', label=f"Heading: {heading} rad", alpha=0.5)
+# points = np.linspace(0, 2 * np.pi, 100)
 plt.plot(target[0], target[1], 'ro', label='Target')
-plt.plot(R * np.cos(points), R * np.sin(points), 'r--', label='Max Turn Radius')
-plt.plot(R*np.cos(points) + c[0], R*np.sin(points) + c[1], 'b--', label='Target Circle')
-plt.plot(c[0], c[1], 'bo', label='Target Point on Circle')
-plt.plot(states[:, 0], states[:, 1])
+# plt.plot(path_manager.c_s[0] + R * np.cos(points), path_manager.c_s[1] + R * np.sin(points), "r--", label="Start circle",)
+# plt.plot(path_manager.c_e[0] + R * np.cos(points), path_manager.c_e[1] + R * np.sin(points), "g--", label="End circle",)
+# plt.plot([path_manager.z1[0], path_manager.z2[0]], [path_manager.z1[1], path_manager.z2[1]], "k--", label="Tangent line",)
+# plt.scatter([path_manager.z1[0], path_manager.z2[0]], [path_manager.z1[1], path_manager.z2[1]], label="Tangent points",)
+# plt.plot(states[:, 0], states[:, 1])
 plt.axis('equal')
 plt.xlabel('X Position (m)')
 plt.ylabel('Y Position (m)')
+# plt.legend()
 plt.savefig('dubins.png', dpi=300)
 plt.show()
 
