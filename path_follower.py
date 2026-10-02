@@ -45,22 +45,38 @@ def get_dubins_parameters(p_s: NDArray[np.float64], chi_s: float, p_e: NDArray[n
 
     # compute L1, L2, L3, L4 distances
     theta = np.arctan2(c_re[1] - c_rs[1], c_re[0] - c_rs[0])
-    L1 = np.linalg.norm(c_rs - c_re) + R*mod(2*np.pi + mod(theta - np.pi/2) - mod(chi_s - np.pi/2)) + R*mod(2*np.pi + mod(chi_e-np.pi/2) - mod(theta - np.pi/2))
+    first_arc_L1 = mod(2*np.pi + mod(theta - np.pi/2) - mod(chi_s - np.pi/2))
+    second_arc_L1 = mod(2*np.pi + mod(chi_e - np.pi/2) - mod(theta - np.pi/2))
+    straight_L1 = np.linalg.norm(c_rs - c_re)
+    L1 = straight_L1 + R*first_arc_L1 + R*second_arc_L1
+    L1_dict = {"first_arc": first_arc_L1, "straight": straight_L1, "second_arc": second_arc_L1}
 
     diff = c_le - c_rs
     ell = np.linalg.norm(diff)
     theta = np.arctan2(diff[1], diff[0])
     ell = np.linalg.norm(c_le - c_rs)
     theta2 = theta - np.pi/2 + np.arcsin(2*R/ell)
-    L2 = np.sqrt(ell**2 - 4*R**2) + R*mod(2*np.pi + mod(theta2) - mod(chi_s - np.pi/2)) + R*mod(2*np.pi + mod(theta2 + np.pi) - mod(chi_e + np.pi/2))
+    first_arc_L2 = mod(2*np.pi + mod(theta2) - mod(chi_s - np.pi/2))
+    second_arc_L2 = mod(2*np.pi + mod(theta2 + np.pi) - mod(chi_e + np.pi/2))
+    straight_L2 = np.sqrt(ell**2 - 4*R**2)
+    L2 = straight_L2 + R*first_arc_L2 + R*second_arc_L2
+    L2_dict = {"first_arc": first_arc_L2, "straight": straight_L2, "second_arc": second_arc_L2}
 
     theta = np.arctan2(c_re[1] - c_ls[1], c_re[0] - c_ls[0])
     ell = np.linalg.norm(c_re - c_ls)
     theta2 = np.arccos(2*R/ell)
-    L3 = np.sqrt(ell**2 - 4*R**2) + R*mod(2*np.pi + mod(chi_s + np.pi/2) - mod(theta + theta2)) + R*mod(2*np.pi + mod(chi_e - np.pi/2) - mod(theta + theta2 - np.pi))
+    first_arc_L3 = mod(2*np.pi + mod(chi_s + np.pi/2) - mod(theta + theta2))
+    second_arc_L3 = mod(2*np.pi + mod(chi_e - np.pi/2) - mod(theta + theta2 - np.pi))
+    straight_L3 = np.sqrt(ell**2 - 4*R**2)
+    L3 = straight_L3 + R*first_arc_L3 + R*second_arc_L3
+    L3_dict = {"first_arc": first_arc_L3, "straight": straight_L3, "second_arc": second_arc_L3}
 
     theta = np.arctan2(c_le[1] - c_ls[1], c_le[0] - c_ls[0])
-    L4 = np.linalg.norm(c_ls - c_le) + R*mod(2*np.pi + mod(chi_s + np.pi/2) - mod(theta + np.pi/2)) + R*mod(2*np.pi + mod(theta + np.pi/2) - mod(chi_e + np.pi/2))
+    first_arc_L4 = mod(2*np.pi + mod(chi_s + np.pi/2) - mod(theta + np.pi/2))
+    second_arc_L4 = mod(2*np.pi + mod(theta + np.pi/2) - mod(chi_e + np.pi/2))
+    straight_L4 = np.linalg.norm(c_ls - c_le)
+    L4 = straight_L4 + R*first_arc_L4 + R*second_arc_L4
+    L4_dict = {"first_arc": first_arc_L4, "straight": straight_L4, "second_arc": second_arc_L4}
 
     # Determine the minimum length path
     lengths = [L1, L2, L3, L4]
@@ -73,6 +89,9 @@ def get_dubins_parameters(p_s: NDArray[np.float64], chi_s: float, p_e: NDArray[n
         q1 = (c_e - c_s) / np.linalg.norm(c_e - c_s)
         z1 = c_s + R * rotation_matrix(-np.pi/2) @ q1
         z2 = c_e + R * rotation_matrix(-np.pi/2) @ q1
+        first_arc = L1_dict["first_arc"]
+        second_arc = L1_dict["second_arc"]
+        straight = L1_dict["straight"]
         
     elif min_index == 1:
         c_s = c_rs
@@ -85,6 +104,10 @@ def get_dubins_parameters(p_s: NDArray[np.float64], chi_s: float, p_e: NDArray[n
         q1 = rotation_matrix(theta2 + np.pi/2) @ np.array([1, 0])
         z1 = c_s + R * rotation_matrix(theta2) @ np.array([1, 0])
         z2 = c_e + R * rotation_matrix(theta2 + np.pi) @ np.array([1, 0])
+        first_arc = L2_dict["first_arc"]
+        second_arc = L2_dict["second_arc"]
+        straight = L2_dict["straight"]
+
     elif min_index == 2:
         c_s = c_ls
         c_e = c_re
@@ -96,6 +119,9 @@ def get_dubins_parameters(p_s: NDArray[np.float64], chi_s: float, p_e: NDArray[n
         q1 = rotation_matrix(theta + theta2 - np.pi/2) @ np.array([1, 0])
         z1 = c_s + R * rotation_matrix(theta + theta2) @ np.array([1, 0])
         z2 = c_e + R * rotation_matrix(theta + theta2 - np.pi) @ np.array([1, 0])
+        first_arc = L3_dict["first_arc"]
+        second_arc = L3_dict["second_arc"]
+        straight = L3_dict["straight"]
     else:
         c_s = c_ls
         c_e = c_le
@@ -104,11 +130,14 @@ def get_dubins_parameters(p_s: NDArray[np.float64], chi_s: float, p_e: NDArray[n
         q1 = (c_e - c_s) / np.linalg.norm(c_e - c_s)    
         z1 = c_s + R * rotation_matrix(np.pi/2) @ q1
         z2 = c_e + R * rotation_matrix(np.pi/2) @ q1
+        first_arc = L4_dict["first_arc"]
+        second_arc = L4_dict["second_arc"]
+        straight = L4_dict["straight"]
 
     z3 = p_e
     q3 = rotation_matrix(chi_e) @ np.array([1, 0])
 
-    return c_s, c_e, lambda_s, lambda_e, z1, z2, z3, q1, q3
+    return c_s, c_e, lambda_s, lambda_e, z1, z2, z3, q1, q3, first_arc, second_arc, straight
 
 
 def mod(x: float) -> float:

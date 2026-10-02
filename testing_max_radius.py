@@ -34,7 +34,7 @@ def compute_trajectory(x0: NDArray[np.float64], target: NDArray[np.float64], tf:
     return np.array(states)
 
 
-x0 = np.array([3500, 0, np.pi])
+x0 = np.array([3000, 0, np.pi])
 v0 = 50
 target = np.array([0, 0, -3*np.pi/4])  # Target position at the origin
 
@@ -44,7 +44,7 @@ t = 0
 
 # execute a maximum acceleration maneuver
 states = []
-final_headings = np.linspace(-np.pi, np.pi, 100)  # Test different final headings]
+final_headings = np.linspace(-2*np.pi/3, 2*np.pi/3, 50) + np.pi  # Test different final headings]
 for headings in final_headings:
     target[2] = headings
     states.append((compute_trajectory(x0, target, tf, v0), headings))

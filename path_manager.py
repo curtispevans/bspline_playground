@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 import params as P
-from path_follower import get_dubins_parameters
+from path_follower import get_dubins_parameters, rotation_matrix
 from dynamics import SimpleDynamics
 
 
@@ -195,3 +195,34 @@ def in_half_plane(
 
 def wrap_angle(angle: float) -> float:
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def dubins_state_at_time(x0, xtf, t, v):
+    R = v**2/P.max_acceleration
+    c_s, c_e, lambda_s, lambda_e, z1, z2, z3, q1, q3, first_arc, second_arc, straight = get_dubins_parameters(x0[:2], x0[2], xtf[:2], xtf[2], R)
+    start_time = R * first_arc / v
+    straight_time = straight / v
+    end_time = R * second_arc / v
+    total_time = start_time + straight_time + end_time
+
+    t = np.clip(t, 0, total_time)
+
+    if t <= start_time:
+        heading_change = lambda_s * v * t / R
+        position = c_s + rotation_matrix(heading_change) @ (x0[:2] - c_s)
+        heading = x0[2] + heading_change
+
+    elif t <= start_time + straight_time:
+        segment_time = t - start_time
+        position = z1 + v * segment_time * q1
+        heading = np.arctan2(q1[1], q1[0])
+    else:
+        segment_time = t - start_time - straight_time
+        heading_change = lambda_e * v * segment_time / R
+        position = c_e + rotation_matrix(heading_change) @ (z2 - c_e)
+        tangent_heading = np.arctan2(q1[1], q1[0])
+        heading = tangent_heading + heading_change
+
+    heading = wrap_angle(heading)
+
+    return position, heading
