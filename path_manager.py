@@ -30,6 +30,9 @@ class PathManager:
             self.z3,
             self.q1,
             self.q3,
+            first_arc,
+            second_arc,
+            straight
         ) = get_dubins_parameters(
             p_s, chi_s, p_e, chi_e, R
         )
@@ -64,7 +67,7 @@ class PathManager:
         vehicle: SimpleDynamics,
         direction: float,
     ) -> NDArray[np.float64]:
-        acceleration = vehicle.v0**2 / self.R
+        acceleration = vehicle.v0**2 / (self.R)
 
         if acceleration > vehicle.max_acceleration + 1e-10:
             raise ValueError(
@@ -197,8 +200,8 @@ def wrap_angle(angle: float) -> float:
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 
-def dubins_state_at_time(x0, xtf, t, v):
-    R = v**2/P.max_acceleration
+def dubins_state_at_time(x0, xtf, t, v, max_acceleration):
+    R = v**2/max_acceleration
     c_s, c_e, lambda_s, lambda_e, z1, z2, z3, q1, q3, first_arc, second_arc, straight = get_dubins_parameters(x0[:2], x0[2], xtf[:2], xtf[2], R)
     start_time = R * first_arc / v
     straight_time = straight / v
@@ -223,6 +226,7 @@ def dubins_state_at_time(x0, xtf, t, v):
         tangent_heading = np.arctan2(q1[1], q1[0])
         heading = tangent_heading + heading_change
 
-    heading = wrap_angle(heading)
+    heading = np.array([wrap_angle(heading)])
+    x = np.concat((position, heading))
 
-    return position, heading
+    return x

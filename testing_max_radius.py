@@ -19,7 +19,7 @@ def compute_trajectory(x0: NDArray[np.float64], target: NDArray[np.float64], tf:
         NDArray[np.float64]: Array of states over time.
     """
     vehicle = SimpleDynamics(x0, v0=v0)
-    R = v0**2 / P.max_acceleration
+    R = v0**2 / (P.max_acceleration)
     path_manager = PathManager(R=R, p_s=x0[:2], chi_s=x0[2], p_e=target[:2], chi_e=target[2])
     t = 0
     states = [vehicle.x]
@@ -34,8 +34,8 @@ def compute_trajectory(x0: NDArray[np.float64], target: NDArray[np.float64], tf:
     return np.array(states)
 
 
-x0 = np.array([3000, 0, np.pi])
-v0 = 50
+x0 = np.array([1000, 0, np.pi])
+v0 = 100
 target = np.array([0, 0, -3*np.pi/4])  # Target position at the origin
 
 t0 = 0
@@ -49,7 +49,7 @@ for headings in final_headings:
     target[2] = headings
     states.append((compute_trajectory(x0, target, tf, v0), headings))
 
-R = v0**2 / P.max_acceleration
+R = v0**2 / (P.max_acceleration)
 print(f"Max radius of curvature: {R:.2f} m")
 
 
