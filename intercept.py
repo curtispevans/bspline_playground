@@ -12,7 +12,6 @@ def find_intercept(
     R_robot = v_robot**2 / a_max_robot
 
     def planned_path(T):
-        # Your function returns (state, ...), hence [0].
         ball_pose = dubins_state_at_time(x_ball0, x_ball_goal, T, v_ball, a_max_ball)
 
         # This choice makes the interceptor match the ball's heading.
