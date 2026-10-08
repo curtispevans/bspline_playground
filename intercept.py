@@ -123,8 +123,24 @@ def find_fastest_intercept(
 
     return None
 
+def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot, a_max_ball, horizon=100):
+    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + np.pi
+    intercept_times = []
+    poses = []
+    for theta in terminal_thetas:
+        ball_goal = np.array([ball_goal[0], ball_goal[1], theta])
+        t_star, pose, params = find_intercept(
+            xi_robot0, x_ball0, ball_goal,
+            v_robot, v_ball, a_max_robot, a_max_ball,
+            horizon
+        )
+        intercept_times.append(t_star)
+        poses.append(pose)
 
-
+    best_intercept_time = np.argmin(intercept_times)
+    best_pose = poses[best_intercept_time]
+    best_intercept_time = intercept_times[best_intercept_time]
+    return best_intercept_time, best_pose, intercept_times
 
 def test():
     x_robot0 = np.array([0, 100, 0])

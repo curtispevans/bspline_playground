@@ -5,7 +5,7 @@ import params as P
 
 
 class SimpleDynamics:
-    def __init__(self, x0: NDArray[np.float64] = np.zeros(3), v0 : float = 0.0):
+    def __init__(self, x0: NDArray[np.float64] = np.zeros(3), v0 : float = 0.0, max_acceleration: float = P.max_acceleration):
         """
         Initialize the simple dynamics model.
         Initial state vector [px, py, heading, vx, vy]
@@ -15,7 +15,7 @@ class SimpleDynamics:
         """
         self.x = x0
         self.max_g = P.max_g
-        self.max_acceleration = P.max_acceleration
+        self.max_acceleration = max_acceleration
         self.Ts = P.Ts
         self.v0 = v0
 
