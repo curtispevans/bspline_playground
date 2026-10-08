@@ -124,6 +124,8 @@ def find_fastest_intercept(
     return None
 
 
+
+
 def test():
     x_robot0 = np.array([0, 100, 0])
     x_ball0 = np.array([1000, 0, np.pi])
@@ -160,7 +162,7 @@ def test():
     plt.show()
 
     print('Running for different terminal headings...')
-    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 25) + np.pi
+    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + np.pi
     intercept1_times = []
     intercept2_times = []
     intercept3_times = []
@@ -177,19 +179,19 @@ def test():
         a_max_ball = P.max_acceleration
         horizon = 100
     
-        t1_star, pose, params = find_fastest_intercept(
+        t1_star, pose, params = find_intercept(
             x1_robot0, x_ball0, ball_goal,
             v_robot, v_ball, a_max_robot, a_max_ball,
             horizon,
         )
-        t2_star, pose, params = find_fastest_intercept(
+        t2_star, pose, params = find_intercept(
             x2_robot0, x_ball0, ball_goal,
             v_robot, v_ball, a_max_robot, a_max_ball,
             horizon,
         )
         intercept2_times.append(t2_star)
 
-        t3_star, pose, params = find_fastest_intercept(
+        t3_star, pose, params = find_intercept(
             x3_robot0, x_ball0, ball_goal,
             v_robot, v_ball, a_max_robot, a_max_ball,
             horizon,
@@ -197,6 +199,12 @@ def test():
         intercept3_times.append(t3_star)
         intercept1_times.append(t1_star)
 
+    robot1_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept1_times)])
+    robot2_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept2_times)])
+    robot3_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept3_times)])
+    print(f'Robot 1 assignment terminal heading for ball {robot1_assigned_terminal_theta}')
+    print(f'Robot 2 assignment terminal heading for ball {robot2_assigned_terminal_theta}')
+    print(f'Robot 3 assignment terminal heading for ball {robot3_assigned_terminal_theta}')
     terminal_thetas = np.rad2deg(np.array(terminal_thetas))
     plt.plot(terminal_thetas, intercept1_times, 'o-', label='Robot 1')
     plt.plot(terminal_thetas, intercept2_times, 'o-', label='Robot 2')
