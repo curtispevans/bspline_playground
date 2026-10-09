@@ -10,13 +10,20 @@ def find_intercept(
     horizon, sample_dt=0.1,
 ):
     R_robot = v_robot**2 / a_max_robot
+    R_ball = v_ball**2 / a_max_ball
 
     def planned_path(T):
+        if np.linalg.norm(x_ball0[:2] - x_ball_goal[:2]) < 2*R_ball:
+            print("Ball is close to the goal.")
+            return None, None, None
         ball_pose = dubins_state_at_time(x_ball0, x_ball_goal, T, v_ball, a_max_ball)
 
         # This choice makes the interceptor match the ball's heading.
         intercept_pose = ball_pose[:3]
         intercept_pose[2] = ball_pose[2]-np.pi
+        if np.linalg.norm(x_robot0[:2] - intercept_pose[:2]) < 2*R_robot:
+            print("Robot is close to the intercept pose.")
+            return None, None, None
         params = get_dubins_parameters(
             x_robot0[:2], x_robot0[2],
             intercept_pose[:2], intercept_pose[2],
@@ -129,13 +136,19 @@ def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot,
     poses = []
     for theta in terminal_thetas:
         ball_goal = np.array([ball_goal[0], ball_goal[1], theta])
-        t_star, pose, params = find_intercept(
+        
+        result = find_intercept(
             xi_robot0, x_ball0, ball_goal,
             v_robot, v_ball, a_max_robot, a_max_ball,
             horizon
         )
+        if result is None:
+            return None, None, None
+        t_star, pose, params = result
         intercept_times.append(t_star)
         poses.append(pose)
+
+        
 
     best_intercept_time = np.argmin(intercept_times)
     best_pose = poses[best_intercept_time]

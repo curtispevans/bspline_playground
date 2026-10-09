@@ -51,22 +51,83 @@ def sim():
         v_robot, v_ball, a_max_robot, a_max_ball,
         horizon
     )
-    print("Best intercept times and poses computed.")
-
     x1_path_manager = PathManager(R_robot, x1_robot0[:2], x1_robot0[2], x1_best_intercept_pose[:2], x1_best_intercept_pose[2])
     x2_path_manager = PathManager(R_robot, x2_robot0[:2], x2_robot0[2], x2_best_intercept_pose[:2], x2_best_intercept_pose[2])
     x3_path_manager = PathManager(R_robot, x3_robot0[:2], x3_robot0[2], x3_best_intercept_pose[:2], x3_best_intercept_pose[2])
+    
+
+    
 
     print("Starting simulation...")
     x1_robot_poses = []
     x2_robot_poses = []
     x3_robot_poses = []
     ball_poses = []
+    t_check = 1
     while t < tf and not ball_hit and not hit_target:
         ball0 = ball.x
         x1_robot0 = x1_robot.x
         x2_robot0 = x2_robot.x
         x3_robot0 = x3_robot.x
+
+        if np.linalg.norm(ball0[:2] - target[:2]) < 2*R_ball:
+            print("Ball is close to the goal.")
+            hit_target = True
+            break
+
+
+        # compute the path manager every second for each robot
+        if t_check - P.Ts <= t <= t_check + P.Ts:
+
+            if np.linalg.norm(x1_robot0[:2] - ball0[:2]) < 2*R_robot:
+                print("Robot 1 is close to the ball.")
+            if np.linalg.norm(x2_robot0[:2] - ball0[:2]) < 2*R_robot:
+                print("Robot 2 is close to the ball.")
+            if np.linalg.norm(x3_robot0[:2] - ball0[:2]) < 2*R_robot:
+                print("Robot 3 is close to the ball.")
+
+            print("Computing best intercept times and poses for each robot...")
+            x1_best_intercept_time, x1_best_intercept_pose, _ = get_cost_metric(
+                x1_robot0, ball0, target,
+                v_robot, v_ball, a_max_robot, a_max_ball,
+                horizon
+            )
+            x2_best_intercept_time, x2_best_intercept_pose, _ = get_cost_metric(
+                x2_robot0, ball0, target,
+                v_robot, v_ball, a_max_robot, a_max_ball,
+                horizon
+            )
+            x3_best_intercept_time, x3_best_intercept_pose, _ = get_cost_metric(
+                x3_robot0, ball0, target,
+                v_robot, v_ball, a_max_robot, a_max_ball,
+                horizon
+            )
+            if x1_best_intercept_pose is not None:
+                x1_path_manager = PathManager(R_robot, x1_robot0[:2], x1_robot0[2], x1_best_intercept_pose[:2], x1_best_intercept_pose[2])
+            if x2_best_intercept_pose is not None:
+                x2_path_manager = PathManager(R_robot, x2_robot0[:2], x2_robot0[2], x2_best_intercept_pose[:2], x2_best_intercept_pose[2])
+            if x3_best_intercept_pose is not None:
+                x3_path_manager = PathManager(R_robot, x3_robot0[:2], x3_robot0[2], x3_best_intercept_pose[:2], x3_best_intercept_pose[2])
+            if x1_best_intercept_pose is None:
+                print("No valid intercept found for Robot 1.")
+                # pronav to the ball
+                x1_path_manager = PathManager(R_robot, x1_robot0[:2], x1_robot0[2], ball0[:2], ball0[2])
+                
+            if x2_best_intercept_pose is None:
+                print("No valid intercept found for Robot 2.")
+                # pronav to the ball
+                x2_path_manager = PathManager(R_robot, x2_robot0[:2], x2_robot0[2], ball0[:2], ball0[2])
+                
+            if x3_best_intercept_pose is None:
+                print("No valid intercept found for Robot 3.")
+                # pronav to the ball
+                x3_path_manager = PathManager(R_robot, x3_robot0[:2], x3_robot0[2], ball0[:2], ball0[2])
+                
+            
+            
+            
+            t_check += 1
+
 
         u_ball = ball_path_manager.update(ball)
         u_x1 = x1_path_manager.update(x1_robot)
@@ -86,7 +147,7 @@ def sim():
             hit_target = True
 
         t += P.Ts
-        print(f"Time: {t}, Ball Position: {ball.x}, Robots: {x1_robot.x}, {x2_robot.x}, {x3_robot.x}")
+        # print(f"Time: {t}, Ball Position: {ball.x}, Robots: {x1_robot.x}, {x2_robot.x}, {x3_robot.x}")
         x1_robot_poses.append(x1_robot.x.copy())
         x2_robot_poses.append(x2_robot.x.copy())
         x3_robot_poses.append(x3_robot.x.copy())
