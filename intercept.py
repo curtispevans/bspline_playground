@@ -13,17 +13,15 @@ def find_intercept(
     R_ball = v_ball**2 / a_max_ball
 
     def planned_path(T):
-        if np.linalg.norm(x_ball0[:2] - x_ball_goal[:2]) < 2*R_ball:
-            print("Ball is close to the goal.")
-            return None, None, None
+        # Dubins paths exist for any pair of poses. Short position separations
+        # are not by themselves infeasible, so do not reject them using 2R.
         ball_pose = dubins_state_at_time(x_ball0, x_ball_goal, T, v_ball, a_max_ball)
+        if not np.all(np.isfinite(ball_pose)):
+            return None
 
         # This choice makes the interceptor match the ball's heading.
         intercept_pose = ball_pose[:3]
         intercept_pose[2] = ball_pose[2]-np.pi
-        if np.linalg.norm(x_robot0[:2] - intercept_pose[:2]) < 2*R_robot:
-            print("Robot is close to the intercept pose.")
-            return None, None, None
         params = get_dubins_parameters(
             x_robot0[:2], x_robot0[2],
             intercept_pose[:2], intercept_pose[2],
@@ -32,10 +30,15 @@ def find_intercept(
 
         first_arc, second_arc, straight = params[-3:]
         length = R_robot * (first_arc + second_arc) + straight
+        if not np.isfinite(length):
+            return None
         return intercept_pose, params, length
 
     def g(T):
-        _, _, length = planned_path(T)
+        result = planned_path(T)
+        if result is None:
+            return np.inf
+        _, _, length = result
         return v_robot * T - length
 
     times = np.linspace(
@@ -131,7 +134,7 @@ def find_fastest_intercept(
     return None
 
 def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot, a_max_ball, horizon=100):
-    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + np.pi
+    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + x_ball0[2]
     intercept_times = []
     poses = []
     for theta in terminal_thetas:
@@ -143,13 +146,14 @@ def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot,
             horizon
         )
         if result is None:
-            return None, None, None
+            continue
         t_star, pose, params = result
         intercept_times.append(t_star)
         poses.append(pose)
 
-        
 
+    if len(intercept_times) == 0:
+        return None, None, []
     best_intercept_time = np.argmin(intercept_times)
     best_pose = poses[best_intercept_time]
     best_intercept_time = intercept_times[best_intercept_time]
