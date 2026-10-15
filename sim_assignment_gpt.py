@@ -191,7 +191,7 @@ def sim():
     x3_robot = SimpleDynamics(x3_robot0, v_robot, a_max_robot)
     ball = SimpleDynamics(ball0, v_ball, a_max_ball)
 
-    terminal_heading = 0*4.422615269729036 + np.pi/2 + 0*np.random.uniform(np.pi/2, 3*np.pi/2)
+    terminal_heading = 4.422615269729036 + 0*np.pi/2 + 0*np.random.uniform(np.pi/2, 3*np.pi/2)
     print(f"terminal_heading: {terminal_heading}")
     target = np.array([0, 0, terminal_heading])
 
@@ -241,10 +241,6 @@ def sim():
         x2_robot0 = x2_robot.x
         x3_robot0 = x3_robot.x
 
-        # if np.linalg.norm(ball0[:2] - target[:2]) < 2*R_ball:
-        #     print("Ball is close to the goal.")
-
-
         # compute the path manager every second for each robot
         if t_check - P.Ts < t < t_check + P.Ts:
             print("Computing best intercept times and poses for each robot...")
@@ -263,19 +259,6 @@ def sim():
                 v_robot, v_ball, a_max_robot, a_max_ball,
                 horizon
             )
-
-            
-
-            
-
-            
-                
-            # if x1_best_intercept_pose is not None:
-            #     x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            # if x2_best_intercept_pose is not None:
-            #     x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            # if x3_best_intercept_pose is not None:
-            #     x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
 
             if x1_best_intercept_pose is None:
                 print("No valid intercept found for Robot 1.")
@@ -308,23 +291,23 @@ def sim():
         #     x3_control = pronav(x3_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
 
         else:
-            if np.linalg.norm(x1_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+            if np.linalg.norm(x1_robot0[:2] - ball0[:2]) < R_robot:
                 print("Robot 1 is close to the ball.")
                 x1_best_intercept_pose = ball0
-            if np.linalg.norm(x2_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+            if np.linalg.norm(x2_robot0[:2] - ball0[:2]) < R_robot:
                 print("Robot 2 is close to the ball.")
                 x2_best_intercept_pose = ball0
-            if np.linalg.norm(x3_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+            if np.linalg.norm(x3_robot0[:2] - ball0[:2]) < R_robot:
                 print("Robot 3 is close to the ball.")
                 x3_best_intercept_pose = ball0
 
-            if np.allclose(x1_best_intercept_pose, target, atol=10):
+            if np.linalg.norm(x1_best_intercept_pose[:2] - target[:2]) < R_robot:
                 print("Robot 1's best intercept pose is at the target.")
                 x1_best_intercept_pose = ball0
-            if np.allclose(x2_best_intercept_pose, target, atol=10):
+            if np.linalg.norm(x2_best_intercept_pose[:2] - target[:2]) < R_robot:
                 print("Robot 2's best intercept pose is at the target.")
                 x2_best_intercept_pose = ball0
-            if np.allclose(x3_best_intercept_pose, target, atol=10):
+            if np.linalg.norm(x3_best_intercept_pose[:2] - target[:2]) < R_robot:
                 print("Robot 3's best intercept pose is at the target.")
                 x3_best_intercept_pose = ball0
 

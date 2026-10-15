@@ -1,8 +1,10 @@
 import numpy as np
 from scipy.optimize import brentq, minimize_scalar
-from path_manager import dubins_state_at_time, get_dubins_parameters
+from path_manager import PathManager, dubins_state_at_time, get_dubins_parameters
 import params as P
 import matplotlib.pyplot as plt
+from dynamics import SimpleDynamics
+from pronav import pronav
 
 def find_intercept(
     x_robot0, x_ball0, x_ball_goal,
@@ -62,6 +64,80 @@ def find_intercept(
         t_left, g_left = t_right, g_right
 
     return None  # No sign-changing intercept found within this horizon.
+
+def find_pronav_intercept(
+    x_robot0, x_ball0, ball_goal,
+    v_robot, v_ball, a_max_robot, a_max_ball,
+    horizon, hit_radius=5.0, ghost_dt=0.05, sim_dt=P.Ts,
+):
+    """Find a *fixed* ghost point for proportional-navigation interception.
+
+    Each candidate ghost is a ball position predicted at ``ghost_time``.
+    Simulate the robot with PN toward that fixed point (ghost_speed=0), and
+    select the candidate yielding the earliest actual robot-ball encounter.
+    The ball prediction and the robot are evaluated on the same time axis.
+
+    Returns (hit_time, ghost_pose, ghost_time), or None if none of the sampled
+    ghost points gives a hit. The ghost's heading is ignored by PN because its
+    speed is zero. Search accuracy depends on ghost_dt and sim_dt.
+    """
+    if min(v_robot, v_ball, a_max_robot, a_max_ball, sim_dt, ghost_dt) <= 0:
+        raise ValueError("Speeds, acceleration limits, and steps must be positive")
+    if horizon < 0 or hit_radius < 0:
+        raise ValueError("Horizon and hit radius must be nonnegative")
+
+    ball_radius = v_ball**2 / a_max_ball
+    ball_path = get_dubins_parameters(
+        x_ball0[:2], x_ball0[2], ball_goal[:2], ball_goal[2], ball_radius,
+    )
+    arc_start, arc_end, straight = ball_path[-3:]
+    ball_arrival = (ball_radius * (arc_start + arc_end) + straight) / v_ball
+    t_end = min(horizon, ball_arrival)
+    times = np.arange(int(np.floor(t_end / sim_dt)) + 1) * sim_dt
+    ball_positions = np.array([
+        dubins_state_at_time(x_ball0, ball_goal, t, v_ball, a_max_ball)[:2]
+        for t in times
+    ])
+
+    def next_state(x, acceleration):
+        """Exact constant-control step for SimpleDynamics' planar model."""
+        px, py, heading = x
+        omega = acceleration / v_robot
+        next_heading = heading + omega * sim_dt
+        if abs(omega) < 1e-10:
+            return np.array([
+                px + v_robot * sim_dt * np.cos(heading),
+                py + v_robot * sim_dt * np.sin(heading), next_heading,
+            ])
+        return np.array([
+            px + (v_robot / omega) * (np.sin(next_heading) - np.sin(heading)),
+            py + (v_robot / omega) * (np.cos(heading) - np.cos(next_heading)),
+            next_heading,
+        ])
+
+    candidate_times = np.unique(np.r_[np.arange(0, t_end, ghost_dt), t_end])
+    best = None
+    for ghost_time in candidate_times:
+        ghost_pose = dubins_state_at_time(
+            x_ball0, ball_goal, ghost_time, v_ball, a_max_ball,
+        )
+        robot_state = np.asarray(x_robot0, dtype=float).copy()
+        if np.linalg.norm(robot_state[:2] - ball_positions[0]) <= hit_radius:
+            return 0.0, ghost_pose, float(ghost_time)
+
+        for i in range(1, len(times)):
+            if best is not None and times[i] >= best[0]:
+                break  # This candidate cannot beat the earliest hit so far.
+            acceleration = pronav(
+                robot_state, ghost_pose, v_robot, ghost_speed=0.0,
+                max_acceleration=a_max_robot,
+            )[0]
+            robot_state = next_state(robot_state, acceleration)
+            if np.linalg.norm(robot_state[:2] - ball_positions[i]) <= hit_radius:
+                best = float(times[i]), ghost_pose.copy(), float(ghost_time)
+                break
+
+    return best
 
 def find_fastest_intercept(
     x_robot0, x_ball0, x_ball_goal,
@@ -134,7 +210,7 @@ def find_fastest_intercept(
     return None
 
 def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot, a_max_ball, horizon=100):
-    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + x_ball0[2]
+    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) #+ x_ball0[2]
     intercept_times = []
     poses = []
     for theta in terminal_thetas:
@@ -159,11 +235,29 @@ def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot,
     best_intercept_time = intercept_times[best_intercept_time]
     return best_intercept_time, best_pose, intercept_times
 
+def get_cost_metric_pronav(
+    xi_robot0, x_ball0, ball_goal, v_robot, v_ball,
+    a_max_robot, a_max_ball, horizon=100, hit_radius=10.0,
+    ghost_dt=0.05,
+):
+    """Return (predicted_hit_time, fixed_ghost_pose, ball_time_at_ghost).
+
+    Evaluate PN against the ball's *actual assigned trajectory* using its
+    given terminal heading. Do not change the terminal heading during the
+    cost calculation unless the ball will really fly a different trajectory.
+    """
+    result = find_pronav_intercept(
+        xi_robot0, x_ball0, ball_goal,
+        v_robot, v_ball, a_max_robot, a_max_ball,
+        horizon, hit_radius=hit_radius, ghost_dt=ghost_dt,
+    )
+    return result if result is not None else (None, None, None)
+
 def test():
     x_robot0 = np.array([0, 100, 0])
     x_ball0 = np.array([1000, 0, np.pi])
     ball_goal = np.array([0, 0, np.pi/2])
-
+    
     v_robot = 30
     v_ball = 100
     a_max_robot = 2*P.gravity
@@ -248,5 +342,211 @@ def test():
     plt.title("Intercept Time vs Terminal Theta")
     plt.show()
 
+def test_as_time_moves():
+    x_robot_initial = np.array([0, 100, 0])
+    x_ball_initial = np.array([1000, 0, np.pi])
+    ball_goal = np.array([0, 0, np.pi/2])
+    v_robot = 30
+    v_ball = 100
+    a_max_robot = 2*P.gravity
+    a_max_ball = P.max_acceleration
+    horizon = 100
+    R_ball = v_ball**2 / a_max_ball
+    x_robot0 = x_robot_initial
+    x_ball0 = x_ball_initial
+    robot = SimpleDynamics(x_robot0, v_robot, a_max_robot)
+    ball = SimpleDynamics(x_ball0, v_ball, a_max_ball)
+    ball_path_manager = PathManager(R_ball, x_ball0[:2], x_ball0[2], ball_goal[:2], ball_goal[2])
+
+    ball_start = x_ball0[:2].copy()
+    ball_end = ball_goal[:2].copy()
+    ball_hit = False
+    times = np.linspace(0, horizon, 10)
+    t = 0
+    t_check = 1
+    t_add = 1
+    x_ball_t = dubins_state_at_time(x_ball0, ball_goal, t, v_ball, a_max_ball)
+    result = find_intercept(
+        x_robot0, x_ball_t, ball_goal,
+        v_robot, v_ball, a_max_robot, a_max_ball,
+        horizon - t,
+    )
+    t_star, pose, params = result
+    while t < horizon and not ball_hit:
+        x_robot0 = robot.x
+        x_ball0 = ball.x
+        if t_check - P.Ts <= t <= t_check + P.Ts:
+            x_ball_t = dubins_state_at_time(x_ball0, ball_goal, t, v_ball, a_max_ball)
+            # result = find_intercept(
+            #     x_robot0, x_ball_t, ball_goal,
+            #     v_robot, v_ball, a_max_robot, a_max_ball,
+            #     horizon - t,
+            # )
+            # if result is None:
+            #     continue
+            # t_star, pose, params = result
+            robot_path = np.array([dubins_state_at_time(x_robot0, pose, t, v_robot, a_max_robot) for t in np.linspace(0, t_star, 100)])
+            ball_path = np.array([dubins_state_at_time(x_ball0, ball_goal, t, v_ball, a_max_ball) for t in np.linspace(0, t_star, 100)])
+            plt.plot(robot_path[:, 0], robot_path[:, 1], 'r-', label='Intercept Path')
+            plt.plot(ball_path[:, 0], ball_path[:, 1], 'b-', label='Ball Path')
+            plt.plot(ball_start[0], ball_start[1], 'go', label='Ball Start')
+            plt.plot(x_robot0[0], x_robot0[1], 'bo', label='Robot Start')
+            plt.plot(x_ball_t[0], x_ball_t[1], 'ko', label='Ball Pose')
+            plt.plot(ball_goal[0], ball_goal[1], 'mo', label='Ball Goal')
+            plt.legend()
+            plt.axis('equal')
+            plt.xlabel("X")
+            plt.ylabel("Y")
+            plt.title(f"Intercept Path at t={t:.2f}")
+            plt.show()
+            t_check += t_add
+        ghost = dubins_state_at_time(x_robot_initial, pose, min(t,t_star), v_robot, a_max_robot)
+        u_robot = pronav(robot.x, ghost, v_robot, ghost_speed=v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+        u_ball = ball_path_manager.update(ball)
+        robot.update(u_robot)
+        ball.update(u_ball)
+        t += P.Ts
+        if np.linalg.norm(robot.x[:2] - ball.x[:2]) < 5.0:
+            print(f"Robot intercepted the ball at time {t:.2f} seconds.")
+            ball_hit = True
+        if np.linalg.norm(ball.x[:2] - ball_goal[:2]) < 5.0:
+            print(f"Ball reached the goal at time {t:.2f} seconds.")
+            ball_hit = True
+
+def test_as_time_moves_1(controller="assigned_ghost", plot_times=(0, 3, 6, 8)):
+    """Compare the simulated motion against one fixed, time-indexed plan.
+
+    Use controller="assigned_ghost" for PN to a fixed point selected from the
+    predicted ball path, or "path_manager" to validate the Dubins path itself.
+    "moving_ghost" uses PN to the ball's current pose and velocity.
+    Use controller="path_ghost" to reproduce the earlier path-tracking test,
+    where proportional navigation pursues a reference on the robot's path.
+    """
+    x_robot_initial = np.array([0., 100., 0.])
+    x_ball_initial = np.array([1000., 0., np.pi])
+    ball_goal = np.array([0., 0., np.pi / 2])
+    v_robot, v_ball = 30., 100.
+    a_max_robot, a_max_ball = 2 * P.gravity, P.max_acceleration
+    horizon = 100.
+
+    result = find_intercept(
+        x_robot_initial, x_ball_initial, ball_goal,
+        v_robot, v_ball, a_max_robot, a_max_ball, horizon,
+    )
+    if result is None:
+        raise RuntimeError("No planned intercept within the horizon")
+    t_star, pose, params = result
+    print(f"Planned intercept: t={t_star:.3f}, position={pose[:2]}")
+
+    robot = SimpleDynamics(x_robot_initial.copy(), v_robot, a_max_robot)
+    ball = SimpleDynamics(x_ball_initial.copy(), v_ball, a_max_ball)
+    robot_path_manager = PathManager(
+        v_robot**2 / a_max_robot, x_robot_initial[:2],
+        x_robot_initial[2], pose[:2], pose[2],
+    )
+    ball_path_manager = PathManager(
+        v_ball**2 / a_max_ball, x_ball_initial[:2],
+        x_ball_initial[2], ball_goal[:2], ball_goal[2],
+    )
+    if controller not in ("assigned_ghost", "path_manager", "moving_ghost", "path_ghost"):
+        raise ValueError(
+            "controller must be 'assigned_ghost', 'path_manager', "
+            "'moving_ghost', or 'path_ghost'"
+        )
+
+    assigned_ghost = None
+    if controller == "assigned_ghost":
+        assignment = find_pronav_intercept(
+            x_robot_initial, x_ball_initial, ball_goal,
+            v_robot, v_ball, a_max_robot, a_max_ball, horizon,
+        )
+        if assignment is None:
+            print("No sampled stationary ghost produced an intercept.")
+            return
+        predicted_hit, assigned_ghost, ghost_time = assignment
+        print(f"Assigned PN ghost: {assigned_ghost[:2]} "
+              f"(ball position predicted at t={ghost_time:.2f} s; "
+              f"PN hit predicted at t={predicted_hit:.2f} s)")
+
+    plan_times = np.linspace(0, t_star, 300)
+    robot_plan = np.array([
+        dubins_state_at_time(x_robot_initial, pose, tau, v_robot, a_max_robot)
+        for tau in plan_times
+    ])
+    ball_plan = np.array([
+        dubins_state_at_time(x_ball_initial, ball_goal, tau, v_ball, a_max_ball)
+        for tau in plan_times
+    ])
+    robot_history = [robot.x.copy()]
+    ball_history = [ball.x.copy()]
+    closest_separation = np.inf
+    closest_time = 0.0
+
+    for step in range(int(horizon / P.Ts) + 1):
+        t = step * P.Ts
+        if any(abs(t - mark) <= P.Ts / 2 for mark in plot_times):
+            robot_trace = np.array(robot_history)
+            ball_trace = np.array(ball_history)
+            fig, ax = plt.subplots()
+            ax.plot(robot_plan[:, 0], robot_plan[:, 1], 'r-', label='Robot plan')
+            ax.plot(ball_plan[:, 0], ball_plan[:, 1], 'b-', label='Ball plan')
+            ax.plot(robot_trace[:, 0], robot_trace[:, 1], 'r:', label='Robot actual')
+            ax.plot(ball_trace[:, 0], ball_trace[:, 1], 'b:', label='Ball actual')
+            ax.plot(*robot.x[:2], 'ro', label='Robot now')
+            ax.plot(*ball.x[:2], 'bo', label='Ball now')
+            ax.plot(*pose[:2], 'kx', label='Planned intercept')
+            if assigned_ghost is not None:
+                ax.plot(*assigned_ghost[:2], 'm*', markersize=10,
+                        label='Assigned stationary ghost')
+            ax.set(xlabel='X', ylabel='Y', title=f'{controller} at t={t:.2f} s')
+            ax.axis('equal')
+            ax.legend()
+            plt.show()
+
+        if controller == "path_manager":
+            u_robot = robot_path_manager.update(robot)
+        elif controller == "assigned_ghost":
+            u_robot = pronav(
+                robot.x, assigned_ghost, robot_speed=v_robot, ghost_speed=0.0,
+                navigation_constant=3, max_acceleration=a_max_robot,
+            )
+        elif controller == "moving_ghost":
+            # Actual ball is the moving target. The first speed is the
+            # robot's speed; ghost_speed is the ball's speed.
+            u_robot = pronav(
+                robot.x, ball.x, robot_speed=v_robot, ghost_speed=v_ball,
+                navigation_constant=3, max_acceleration=a_max_robot,
+            )
+        else:  # controller == "path_ghost": path-reference experiment
+            ghost = dubins_state_at_time(
+                x_robot_initial, pose, min(t, t_star), v_robot, a_max_robot,
+            )
+            u_robot = pronav(
+                robot.x, ghost, v_robot, ghost_speed=v_robot,
+                navigation_constant=3, max_acceleration=a_max_robot,
+            )
+        u_ball = ball_path_manager.update(ball)
+        robot.update(u_robot)
+        ball.update(u_ball)
+        robot_history.append(robot.x.copy())
+        ball_history.append(ball.x.copy())
+
+        separation = np.linalg.norm(robot.x[:2] - ball.x[:2])
+        if separation < closest_separation:
+            closest_separation = separation
+            closest_time = t + P.Ts
+        if separation < 2.5:
+            print(f"Robot intercepted the ball at t={t + P.Ts:.2f} s "
+                  f"(separation={separation:.2f}).")
+            return
+        if np.linalg.norm(ball.x[:2] - ball_goal[:2]) < 5.0:
+            print(f"Ball reached the goal at t={t + P.Ts:.2f} s "
+                  f"(separation={separation:.2f}).")
+            print(f"Closest approach: {closest_separation:.2f} "
+                  f"at t={closest_time:.2f} s.")
+            return
+    
+
 if __name__ == "__main__":
-    test()
+    # test()
+    test_as_time_moves_1(controller="assigned_ghost")
