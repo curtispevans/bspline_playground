@@ -30,8 +30,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
         print("No simulation frames were recorded.")
         return None, None
 
-    fig, ax = plt.subplots(figsize=(9, 8))
-    fig.subplots_adjust(bottom=0.24)
+    fig, ax = plt.subplots(figsize=(12, 7))
+    fig.subplots_adjust(left=0.09, right=0.98, bottom=0.28, top=0.78)
 
     all_xy = [ball_poses[:, :2], *(poses[:, :2] for poses in robot_poses), target[None, :2]]
     all_xy = np.vstack(all_xy)
@@ -66,10 +66,21 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     ax.plot(ball_poses[:, 0], ball_poses[:, 1], color="magenta", alpha=0.18, linewidth=1.5)
     ball_trail, = ax.plot([], [], color="magenta", linewidth=2.0, label="Ball trail")
     ball_marker, = ax.plot([], [], "o", color="magenta", markersize=9, label="Ball")
-    status = ax.text(0.02, 0.98, "", transform=ax.transAxes, va="top",
-                     family="monospace", fontsize=9,
-                     bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.8"})
-    ax.legend(loc="best", fontsize=8)
+    status = fig.text(0.5, 0.215, "",
+                    ha="center", va="center",
+                    family="monospace", fontsize=8,
+                    bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.8", "pad": 3},
+                )
+    handles, legend_labels = ax.get_legend_handles_labels()
+    fig.legend(
+        handles, legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.98),
+        ncol=3,
+        fontsize=8,
+        frameon=False,
+        columnspacing=1.2,
+    )
 
     slider_ax = fig.add_axes([0.15, 0.12, 0.70, 0.035])
     frame_slider = Slider(slider_ax, "Frame", 0, n_frames - 1,
@@ -110,10 +121,10 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
         control_text = ", ".join(f"{values[frame]:+.2f}" for values in controls)
         status.set_text(
             f"t = {times[frame]:.2f} s    frame {frame + 1}/{n_frames}\n"
-            f"range to ball: R1 {robot_ball_ranges[0]:.1f} | "
-            f"R2 {robot_ball_ranges[1]:.1f} | R3 {robot_ball_ranges[2]:.1f}\n"
-            f"normal accel [R1, R2, R3]: {control_text} m/s²\n"
-            "diamonds = latest computed intercept poses; controllers currently target the ball"
+            f"range [R1, R2, R3]: "
+            f"[{robot_ball_ranges[0]:.1f}, {robot_ball_ranges[1]:.1f}, "
+            f"{robot_ball_ranges[2]:.1f}] m    "
+            f"normal accel [R1, R2, R3]: [{control_text}] m/s²"
         )
         fig.canvas.draw_idle()
 
@@ -180,7 +191,7 @@ def sim():
     x3_robot = SimpleDynamics(x3_robot0, v_robot, a_max_robot)
     ball = SimpleDynamics(ball0, v_ball, a_max_ball)
 
-    terminal_heading = 4.422615269729036 + 0*np.random.uniform(np.pi/2, 3*np.pi/2)
+    terminal_heading = 0*4.422615269729036 + np.pi/2 + 0*np.random.uniform(np.pi/2, 3*np.pi/2)
     print(f"terminal_heading: {terminal_heading}")
     target = np.array([0, 0, terminal_heading])
 
@@ -236,20 +247,12 @@ def sim():
 
         # compute the path manager every second for each robot
         if t_check - P.Ts < t < t_check + P.Ts:
-
-            if np.linalg.norm(x1_robot0[:2] - ball0[:2]) < 2*R_robot:
-                print("Robot 1 is close to the ball.")
-            if np.linalg.norm(x2_robot0[:2] - ball0[:2]) < 2*R_robot:
-                print("Robot 2 is close to the ball.")
-            if np.linalg.norm(x3_robot0[:2] - ball0[:2]) < 2*R_robot:
-                print("Robot 3 is close to the ball.")
-
             print("Computing best intercept times and poses for each robot...")
             x1_best_intercept_time, x1_best_intercept_pose, _ = get_cost_metric(
-                x1_robot0, ball0, target,
-                v_robot, v_ball, a_max_robot, a_max_ball,
-                horizon
-            )
+                            x1_robot0, ball0, target,
+                            v_robot, v_ball, a_max_robot, a_max_ball,
+                            horizon
+                        )
             x2_best_intercept_time, x2_best_intercept_pose, _ = get_cost_metric(
                 x2_robot0, ball0, target,
                 v_robot, v_ball, a_max_robot, a_max_ball,
@@ -260,12 +263,20 @@ def sim():
                 v_robot, v_ball, a_max_robot, a_max_ball,
                 horizon
             )
-            if x1_best_intercept_pose is not None:
-                x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            if x2_best_intercept_pose is not None:
-                x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            if x3_best_intercept_pose is not None:
-                x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+
+            
+
+            
+
+            
+                
+            # if x1_best_intercept_pose is not None:
+            #     x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            # if x2_best_intercept_pose is not None:
+            #     x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            # if x3_best_intercept_pose is not None:
+            #     x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+
             if x1_best_intercept_pose is None:
                 print("No valid intercept found for Robot 1.")
                 print(f"robot 1 position: {x1_robot.x}")
@@ -289,14 +300,35 @@ def sim():
 
             t_check += t_check_step
 
-        if x1_best_intercept_pose is None:
-            x1_control = pronav(x1_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-        if x2_best_intercept_pose is None:
-            x2_control = pronav(x2_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-        if x3_best_intercept_pose is None:
-            x3_control = pronav(x3_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+        # if np.allclose(x1_best_intercept_pose, target, atol=1e-2):
+        #     x1_control = pronav(x1_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+        # if np.allclose(x2_best_intercept_pose, target, atol=1e-2):
+        #     x2_control = pronav(x2_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+        # if np.allclose(x3_best_intercept_pose, target, atol=1e-2):
+        #     x3_control = pronav(x3_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
 
         else:
+            if np.linalg.norm(x1_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+                print("Robot 1 is close to the ball.")
+                x1_best_intercept_pose = ball0
+            if np.linalg.norm(x2_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+                print("Robot 2 is close to the ball.")
+                x2_best_intercept_pose = ball0
+            if np.linalg.norm(x3_robot0[:2] - ball0[:2]) < 1.5*R_ball:
+                print("Robot 3 is close to the ball.")
+                x3_best_intercept_pose = ball0
+
+            if np.allclose(x1_best_intercept_pose, target, atol=10):
+                print("Robot 1's best intercept pose is at the target.")
+                x1_best_intercept_pose = ball0
+            if np.allclose(x2_best_intercept_pose, target, atol=10):
+                print("Robot 2's best intercept pose is at the target.")
+                x2_best_intercept_pose = ball0
+            if np.allclose(x3_best_intercept_pose, target, atol=10):
+                print("Robot 3's best intercept pose is at the target.")
+                x3_best_intercept_pose = ball0
+
+            
             x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
             x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
             x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)

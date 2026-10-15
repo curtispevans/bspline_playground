@@ -170,7 +170,7 @@ def test():
     a_max_ball = P.max_acceleration
     horizon = 100
 
-    t_star, pose, params = find_fastest_intercept(
+    t_star, pose, params = find_intercept(
         x_robot0, x_ball0, ball_goal,
         v_robot, v_ball, a_max_robot, a_max_ball,
         horizon,
