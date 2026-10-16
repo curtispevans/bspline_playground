@@ -8,6 +8,7 @@ observations select a candidate path and update the stationary PN ghosts.
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+import matplotlib.pyplot as plt
 
 import params as P
 from dynamics import SimpleDynamics
@@ -19,9 +20,114 @@ from pronav import pronav
 from sim_assignment_pn import animate_simulation, _pose_for_history
 
 
+def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
+                    update_events, goal_xy, hit_robot, save_path):
+    """Plot four snapshots of the robot paths and their assigned PN ghosts."""
+    times = np.asarray(times)
+    ball_poses = np.asarray(ball_poses)
+    robot_poses = [np.asarray(poses) for poses in robot_poses]
+    ghost_poses = [np.asarray(poses) for poses in ghost_poses]
+    final_time = times[-1]
+    first_update = update_events[0][0] if update_events else 0.25 * final_time
+    snapshot_times = [0., min(final_time, first_update + 0.15),
+                      min(final_time, 0.5 * (first_update + final_time)),
+                      final_time]
+    indices = [min(np.searchsorted(times, instant), len(times) - 1)
+               for instant in snapshot_times]
+    colors = ("#d85140", "#147d65", "#4874b8")
+    fig, axes = plt.subplots(2, 2, figsize=(15, 9), sharex=True, sharey=True)
+    fig.subplots_adjust(top=0.83, bottom=0.12, left=0.06, right=0.98,
+                        hspace=0.25, wspace=0.08)
+    fig.suptitle("Interception with an unknown intruder terminal heading",
+                 fontsize=17, fontweight="semibold", y=0.98)
+    fig.text(0.5, 0.93, "Four moments from the same run  |  diamonds: stationary PN ghosts",
+             ha="center", fontsize=11)
+
+    positions = np.vstack([ball_poses[:, :2],
+                           *(poses[:, :2] for poses in robot_poses),
+                           *(poses[np.isfinite(poses[:, :2]).all(axis=1), :2]
+                             for poses in ghost_poses),
+                           np.asarray(goal_xy)[None, :]])
+    padding = 40.
+    xlimits = (np.min(positions[:, 0]) - padding,
+               np.max(positions[:, 0]) + padding)
+    ylimits = (np.min(positions[:, 1]) - padding,
+               np.max(positions[:, 1]) + padding)
+
+    for panel, (ax, index) in enumerate(zip(axes.flat, indices)):
+        current_t = times[index]
+        if panel == 0:
+            stage = "Initial heading assignments"
+        elif panel == 1 and update_events:
+            stage = f"After observing intruder: heading {update_events[0][1]:.3f} rad"
+        elif panel == 3 and hit_robot is not None:
+            stage = f"Defender {hit_robot} intercepts"
+        else:
+            stage = "Continuing toward assigned ghosts"
+        ax.set_title(f"t = {current_t:.2f} s  |  {stage}", fontsize=11)
+        ax.plot(ball_poses[:, 0], ball_poses[:, 1], color="#d7b6d0",
+                lw=1.8, label="Intruder path (hindsight)" if panel == 0 else None)
+        ax.plot(ball_poses[:index + 1, 0], ball_poses[:index + 1, 1],
+                color="#a02085", lw=2.7, label="Intruder traveled" if panel == 0 else None)
+        ax.scatter(*ball_poses[index, :2], color="#a02085", s=82, zorder=9,
+                   edgecolor="white", linewidth=1)
+        ax.scatter(*goal_xy, marker="*", color="#262626", s=160, zorder=8,
+                   label="Goal" if panel == 0 else None)
+
+        for robot_id, (poses, ghosts, color) in enumerate(
+                zip(robot_poses, ghost_poses, colors), start=1):
+            ax.plot(poses[:, 0], poses[:, 1], color=color, lw=1.5, alpha=0.22)
+            ax.plot(poses[:index + 1, 0], poses[:index + 1, 1],
+                    color=color, lw=2.2,
+                    label=f"Defender {robot_id}" if panel == 0 else None)
+            ax.scatter(*poses[index, :2], color=color, s=65, zorder=7,
+                       edgecolor="white", linewidth=1)
+            ghost_xy = ghosts[index, :2]
+            if np.isfinite(ghost_xy).all():
+                ax.plot([poses[index, 0], ghost_xy[0]],
+                        [poses[index, 1], ghost_xy[1]], color=color,
+                        lw=1.1, ls="--", alpha=0.48)
+                ax.scatter(*ghost_xy, marker="D", facecolor="white",
+                           edgecolor=color, linewidth=2, s=75, zorder=6)
+                ax.annotate(f"G{robot_id}", ghost_xy, xytext=(6, 6),
+                            textcoords="offset points", fontsize=9, color=color)
+
+            # Ghosts recorded at the update time are still the old ghosts;
+            # the following time step contains the newly assigned ones.
+            if panel == 1 and update_events:
+                update_index = min(np.searchsorted(times, first_update), len(times) - 1)
+                previous_xy = ghosts[update_index, :2]
+                if (np.isfinite(previous_xy).all() and np.isfinite(ghost_xy).all()
+                        and np.linalg.norm(ghost_xy - previous_xy) > 1.0):
+                    ax.scatter(*previous_xy, marker="x", s=55, color=color,
+                               alpha=0.8, zorder=6)
+                    ax.annotate("", ghost_xy, previous_xy,
+                                arrowprops={"arrowstyle": "->", "color": color,
+                                            "lw": 1.3, "alpha": 0.8})
+
+        ax.set_xlim(*xlimits)
+        ax.set_ylim(*ylimits)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(alpha=0.2)
+        ax.set_xlabel("x position")
+        ax.set_ylabel("y position")
+
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.905),
+               ncol=6, frameon=False, fontsize=10)
+    fig.text(0.5, 0.04,
+             "Pale paths show the completed run, for display only. Dashed lines "
+             "point to current ghosts; crosses and arrows show their updates.",
+             ha="center", fontsize=10)
+    fig.savefig(save_path, dpi=180)
+    plt.show()
+    plt.close(fig)
+
+
 def sim(animate=True, update_ghosts=True,
         candidate_headings=None, true_terminal_heading=4.422615269729036,
-        update_interval=1.0, error_threshold=15.0):
+        update_interval=1.0, error_threshold=15.0, plot=True,
+        plot_path="sim_assignment_unknown_heading.png"):
     """Run the three-robot simulation without revealing the terminal heading.
 
     ``candidate_headings`` must span the ball paths the robots consider
@@ -92,7 +198,7 @@ def sim(animate=True, update_ghosts=True,
         ghost = None if result is None else result[1].copy()
         initial_indices[i] = heading_index
         ghosts[i] = ghost
-        print(f"  Robot {i + 1}: heading={candidate_headings[heading_index]:.3f}, "
+        print(f"  Defender {i + 1}: heading={candidate_headings[heading_index]:.3f}, "
               f"ghost={None if ghost is None else ghost[:2].round(2)}, "
               f"predicted hit={None if result is None else round(result[0], 2)}")
 
@@ -173,12 +279,12 @@ def sim(animate=True, update_ghosts=True,
                 update_events.append((t, candidate_headings[chosen], errors[chosen]))
                 print(f"t={t:.2f} s: closest sampled heading "
                       f"{candidate_headings[chosen]:.3f} rad, "
-                      f"ball-position residual {errors[chosen]:.2f}")
+                      f"intruder-position residual {errors[chosen]:.2f}")
                 if errors[chosen] > error_threshold:
-                    print("  Ball motion does not fit any sampled heading well; "
+                    print("  Intruder motion does not fit any sampled heading well; "
                           "consider widening or refining the bank.")
                 for i, ghost in enumerate(ghosts, 1):
-                    print(f"  Robot {i} updated ghost: "
+                    print(f"  Defender {i} updated ghost: "
                           f"{None if ghost is None else ghost[:2].round(2)}")
 
         robot_controls = [
@@ -204,14 +310,22 @@ def sim(animate=True, update_ghosts=True,
         for i, robot in enumerate(robots):
             if np.linalg.norm(robot.x[:2] - ball.x[:2]) < hit_radius:
                 hit_robot = i + 1
-                print(f"Robot {hit_robot} hit the ball at t={t:.2f} s.")
+                print(f"Defender {hit_robot} hit the intruder at t={t:.2f} s.")
                 break
         if hit_robot is not None:
             break
         if np.linalg.norm(ball.x[:2] - goal_xy) < 5.0:
             hit_target = True
-            print(f"Ball reached the goal at t={t:.2f} s.")
+            print(f"Intruder reached the goal at t={t:.2f} s.")
             break
+
+    if plot:
+        plot_simulation(times,
+                        [np.asarray(history) for history in robot_history],
+                        ball_history,
+                        [np.asarray(history) for history in ghost_history],
+                        update_events, goal_xy, hit_robot, plot_path)
+        print(f"Saved static plot to {plot_path}")
 
     if animate:
         animate_simulation(
@@ -233,6 +347,8 @@ def sim(animate=True, update_ghosts=True,
 
 if __name__ == "__main__":
     true_terminal_heading = np.pi/2 + 0*np.random.uniform(np.pi / 2, 3 * np.pi / 2)
+    # true_terminal_heading = 4.422615269729036
     print(f"Simulating with true terminal heading {true_terminal_heading:.3f} rad.")
-    sim(true_terminal_heading=true_terminal_heading)
+    # sim(true_terminal_heading=true_terminal_heading)
+    sim(true_terminal_heading=true_terminal_heading, update_interval=0.5, error_threshold=5.)
     

@@ -24,7 +24,7 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     bright lines show the trail up to the selected frame.
     """
     colors = ("tab:red", "tab:green", "tab:blue")
-    labels = ("Robot 1", "Robot 2", "Robot 3")
+    labels = ("Defender 1", "Defender 2", "Defender 3")
     n_frames = len(times)
     if n_frames == 0:
         print("No simulation frames were recorded.")
@@ -42,9 +42,9 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
-    ax.set_title("Robot and Ball Simulation — replay controls below")
+    ax.set_title("Defender and Intruder Simulation — replay controls below")
     ax.grid(True, alpha=0.25)
-    ax.plot(target[0], target[1], marker="*", color="black", markersize=14, label="Ball goal")
+    ax.plot(target[0], target[1], marker="*", color="black", markersize=14, label="Intruder goal")
 
     trail_lines = []
     robot_markers = []
@@ -121,10 +121,10 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
         control_text = ", ".join(f"{values[frame]:+.2f}" for values in controls)
         status.set_text(
             f"t = {times[frame]:.2f} s    frame {frame + 1}/{n_frames}\n"
-            f"range [R1, R2, R3]: "
+            f"range [D1, D2, D3]: "
             f"[{robot_ball_ranges[0]:.1f}, {robot_ball_ranges[1]:.1f}, "
             f"{robot_ball_ranges[2]:.1f}] m    "
-            f"normal accel [R1, R2, R3]: [{control_text}] m/s²"
+            f"normal accel [D1, D2, D3]: [{control_text}] m/s²"
         )
         fig.canvas.draw_idle()
 

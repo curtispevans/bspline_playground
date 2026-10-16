@@ -3,7 +3,7 @@ import params as P
 from dynamics import SimpleDynamics
 from intercept import get_cost_metric
 from path_manager import PathManager
-from pronav_controller import pronav
+from pronav import pronav
 import matplotlib.pyplot as plt
 import time
 
@@ -26,7 +26,7 @@ def sim():
     x3_robot = SimpleDynamics(x3_robot0, v_robot, a_max_robot)
     ball = SimpleDynamics(ball0, v_ball, a_max_ball)
 
-    terminal_heading = 0*4.422615269729036 + np.random.uniform(np.pi/2, 3*np.pi/2)
+    terminal_heading = 3*np.pi/2 + 0*4.422615269729036 + 0*np.random.uniform(np.pi/2, 3*np.pi/2)
     print(f"terminal_heading: {terminal_heading}")
     target = np.array([0, 0, terminal_heading])
 
@@ -157,16 +157,16 @@ def sim():
             t_check += t_check_step
 
         if x1_best_intercept_pose is None:
-            x1_control = pronav(x1_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            x1_control = pronav(x1_robot.x, ball0, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
         if x2_best_intercept_pose is None:
-            x2_control = pronav(x2_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            x2_control = pronav(x2_robot.x, ball0, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
         if x3_best_intercept_pose is None:
-            x3_control = pronav(x3_robot.x, ball0, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            x3_control = pronav(x3_robot.x, ball0, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
 
         else:
-            x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
-            x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, v_ball, navigation_constant=3, max_acceleration=a_max_robot)
+            x1_control = pronav(x1_robot.x, x1_best_intercept_pose, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
+            x2_control = pronav(x2_robot.x, x2_best_intercept_pose, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
+            x3_control = pronav(x3_robot.x, x3_best_intercept_pose, v_robot, ghost_speed=0, navigation_constant=3, max_acceleration=a_max_robot)
 
         u_ball = ball_path_manager.update(ball)
         u_x1 = x1_control
@@ -182,7 +182,7 @@ def sim():
             if np.linalg.norm(robot.x[:2] - ball.x[:2]) < 10:
                 ball_hit = True
                 break
-        print(f"Ball Position: {ball.x}, Target Position: {target}")
+        # print(f"Ball Position: {ball.x}, Target Position: {target}")
         if np.linalg.norm(ball.x[:2] - target[:2]) < 10:
             print('here')
             print(f'norm value {np.linalg.norm(ball.x[:2] - target[:2])}')
