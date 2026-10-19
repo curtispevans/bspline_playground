@@ -119,7 +119,7 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
              "Pale paths show the completed run, for display only. Dashed lines "
              "point to current ghosts; crosses and arrows show their updates.",
              ha="center", fontsize=10)
-    fig.savefig(save_path, dpi=180)
+    fig.savefig(save_path, dpi=300)
     plt.show()
     plt.close(fig)
 
@@ -244,15 +244,48 @@ def sim(animate=True, update_ghosts=True,
                 np.linalg.norm(ball.x[:2] - state[:2])
                 for state in candidate_states
             ])
-            chosen = int(np.argmin(errors))
+            best_error = float(np.min(errors))
+            tied_indices = np.flatnonzero(
+                np.abs(errors - best_error) <= 1e-6
+            )
+            if len(tied_indices) == 1:
+                chosen = int(tied_indices[0])
+            elif active_heading_index in tied_indices:
+                # Keep the current hypothesis while it remains tied for best.
+                chosen = active_heading_index
+            else:
+                # Resolve a positional tie toward the center of the heading
+                # bank. For a bank symmetric about pi, this picks mirrored
+                # hypotheses (e.g. 1.885 and 4.398 rad) instead of whichever
+                # candidate happens to appear first in the array.
+                bank_center = 0.5 * (
+                    np.min(candidate_headings) + np.max(candidate_headings)
+                )
+                center_distances = np.abs(
+                    candidate_headings[tied_indices] - bank_center
+                )
+                nearest_to_center = tied_indices[
+                    np.flatnonzero(
+                        np.abs(center_distances - np.min(center_distances))
+                        <= 1e-12
+                    )
+                ]
+                chosen = (int(nearest_to_center[0])
+                          if len(nearest_to_center) == 1 else None)
             active_error = (np.inf if active_heading_index is None
                             else errors[active_heading_index])
 
             # Replan when evidence changes the likely heading or the active
-            # forecast becomes inaccurate. Keep the old ghost otherwise.
-            should_update = (chosen != active_heading_index or
-                             active_error > error_threshold)
-            if should_update and t < candidate_arrivals[chosen]:
+            # forecast becomes inaccurate. Keep old ghosts only if a tie also
+            # remains symmetric around the bank center.
+            should_update = (chosen is not None and
+                             (chosen != active_heading_index or
+                              active_error > error_threshold))
+            if chosen is None:
+                print(f"t={t:.2f} s: ambiguous between sampled headings "
+                      f"{candidate_headings[tied_indices].round(3)} rad; "
+                      "keeping current ghost assignments")
+            elif should_update and t < candidate_arrivals[chosen]:
                 end = min(candidate_arrivals[chosen], horizon)
                 future_times = t + np.arange(
                     int(np.floor((end - t) / P.Ts)) + 1
@@ -346,7 +379,7 @@ def sim(animate=True, update_ghosts=True,
 
 
 if __name__ == "__main__":
-    true_terminal_heading = np.pi/2 + 0*np.random.uniform(np.pi / 2, 3 * np.pi / 2)
+    true_terminal_heading = -np.pi/2 + 0*np.random.uniform(np.pi / 2, 3 * np.pi / 2)
     # true_terminal_heading = 4.422615269729036
     print(f"Simulating with true terminal heading {true_terminal_heading:.3f} rad.")
     # sim(true_terminal_heading=true_terminal_heading)

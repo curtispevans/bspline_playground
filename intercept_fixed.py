@@ -131,7 +131,8 @@ def find_pronav_intercept_on_trajectory(
         if abs(omega) < 1e-10:
             return np.array([
                 px + v_robot * sim_dt * np.cos(heading),
-                py + v_robot * sim_dt * np.sin(heading), next_heading,
+                py + v_robot * sim_dt * np.sin(heading), 
+                next_heading,
             ])
         return np.array([
             px + (v_robot / omega) * (np.sin(next_heading) - np.sin(heading)),
