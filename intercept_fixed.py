@@ -241,7 +241,7 @@ def get_cost_metric(
     a_max_robot, a_max_ball, horizon=100, hit_radius=10.0,
     ghost_dt=0.05,
 ):
-    """Return (predicted_hit_time, fixed_ghost_pose, ball_time_at_ghost).
+    """Return (predicted_hit_time, fixed_ghost_pose, ball_time_at_ghost, theta).
 
     Evaluate PN against the ball's *actual assigned trajectory* using its
     given terminal heading. Do not change the terminal heading during the
@@ -252,7 +252,9 @@ def get_cost_metric(
         v_robot, v_ball, a_max_robot, a_max_ball,
         horizon, hit_radius=hit_radius, ghost_dt=ghost_dt,
     )
-    return result if result is not None else (None, None, None)
+    return (*result, float(ball_goal[2])) if result is not None else (
+        None, None, None, float(ball_goal[2])
+    )
 
 def test():
     x_robot0 = np.array([0, 100, 0])

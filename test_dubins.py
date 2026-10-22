@@ -1,6 +1,7 @@
 import numpy as np
 from path_manager import dubins_state_at_time
 import matplotlib.pyplot as plt
+import params as P
 
 
 
@@ -10,10 +11,10 @@ target = np.array([0, 0, -np.pi/2])  # Target position at the origin
 
 t = np.linspace(0, 100, 300)
 paths = []
-terminal_headings = np.linspace(-1*np.pi/2, np.pi/2, 50) + np.pi
+terminal_headings = np.linspace(np.pi/6, np.pi*11/6, 50)
 for heading in terminal_headings:
     target[2] = heading
-    path = [dubins_state_at_time(x0, target, ti, v0) for ti in t]
+    path = [dubins_state_at_time(x0, target, ti, v0, P.max_acceleration) for ti in t]
     path = np.array(path)
     paths.append(path)
 

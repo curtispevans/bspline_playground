@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from dynamics import SimpleDynamics
 from pronav import pronav
 
+SELECTION_MODES = ("slowest_symmetric", "median")
+
 def find_intercept(
     x_robot0, x_ball0, x_ball_goal,
     v_robot, v_ball, a_max_robot, a_max_ball,
@@ -209,31 +211,339 @@ def find_fastest_intercept(
 
     return None
 
-def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball, a_max_robot, a_max_ball, horizon=100):
-    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) #+ x_ball0[2]
-    intercept_times = []
-    poses = []
-    for theta in terminal_thetas:
-        ball_goal = np.array([ball_goal[0], ball_goal[1], theta])
-        
-        result = find_intercept(
-            xi_robot0, x_ball0, ball_goal,
-            v_robot, v_ball, a_max_robot, a_max_ball,
-            horizon
-        )
-        if result is None:
+
+def _symmetric_center_robot_index(xi_robots0, x_ball0, ball_goal,
+                                  terminal_thetas, tol=1e-6):
+    """Return the centered defender when the heading problem is symmetric."""
+    if len(xi_robots0) < 3 or len(terminal_thetas) < 3:
+        return None
+
+    theta_center = 0.5 * (terminal_thetas[0] + terminal_thetas[-1])
+    if not np.allclose(terminal_thetas + terminal_thetas[::-1],
+                       2 * theta_center, atol=tol, rtol=0):
+        return None
+    center_j = int(np.argmin(np.abs(terminal_thetas - theta_center)))
+    if abs(terminal_thetas[center_j] - theta_center) > tol:
+        return None
+
+    axis = np.array([np.cos(theta_center), np.sin(theta_center)])
+    normal = np.array([-axis[1], axis[0]])
+    ball_xy = np.asarray(x_ball0[:2], dtype=float)
+    goal_delta = np.asarray(ball_goal[:2], dtype=float) - ball_xy
+    if abs(np.dot(goal_delta, normal)) > tol * max(1.0, np.linalg.norm(goal_delta)):
+        return None
+
+    poses = [np.asarray(pose, dtype=float) for pose in xi_robots0]
+    for center_i, center_pose in enumerate(poses):
+        center_delta = center_pose[:2] - ball_xy
+        if abs(np.dot(center_delta, normal)) > tol:
             continue
-        t_star, pose, params = result
-        intercept_times.append(t_star)
-        poses.append(pose)
+        # A heading on the symmetry axis is unchanged by reflection.
+        reflected_center_heading = 2 * theta_center - center_pose[2]
+        heading_error = np.arctan2(
+            np.sin(reflected_center_heading - center_pose[2]),
+            np.cos(reflected_center_heading - center_pose[2]),
+        )
+        if abs(heading_error) > tol:
+            continue
+
+        for first_i in range(len(poses)):
+            if first_i == center_i:
+                continue
+            first_delta = poses[first_i][:2] - ball_xy
+            reflected_position = ball_xy + 2 * axis * np.dot(first_delta, axis) - first_delta
+            reflected_heading = 2 * theta_center - poses[first_i][2]
+            for second_i in range(len(poses)):
+                if second_i in (center_i, first_i):
+                    continue
+                second_pose = poses[second_i]
+                heading_error = np.arctan2(
+                    np.sin(reflected_heading - second_pose[2]),
+                    np.cos(reflected_heading - second_pose[2]),
+                )
+                if (np.allclose(reflected_position, second_pose[:2],
+                                atol=tol, rtol=0) and
+                        abs(heading_error) <= tol):
+                    midpoint = 0.5 * (poses[first_i][:2] + second_pose[:2])
+                    if np.allclose(midpoint, center_pose[:2], atol=tol, rtol=0):
+                        return center_i
+    return None
 
 
-    if len(intercept_times) == 0:
-        return None, None, []
-    best_intercept_time = np.argmin(intercept_times)
-    best_pose = poses[best_intercept_time]
-    best_intercept_time = intercept_times[best_intercept_time]
-    return best_intercept_time, best_pose, intercept_times
+def _default_terminal_thetas(ball_heading):
+    """Keep the original 10-heading bank and add its exact midpoint."""
+    half_span = np.deg2rad(135)
+    sampled = np.linspace(-half_span, half_span, 30) + ball_heading
+    return np.sort(np.append(sampled, ball_heading))
+
+
+def _approach_terminal_thetas(x_ball0, ball_goal, radius):
+    """Supplement the heading bank with short straight-then-turn endpoints.
+
+    The goal must lie on a radius-R circle tangent to the current heading
+    after a nonnegative straight segment. These endpoints keep a narrow short
+    branch represented as the intruder approaches its terminal turn, without
+    using the intruder's true terminal heading.
+    """
+    heading = x_ball0[2]
+    candidates = list(_default_terminal_thetas(heading))
+    forward = np.array([np.cos(heading), np.sin(heading)])
+    normal = np.array([-forward[1], forward[0]])
+    delta = np.asarray(ball_goal[:2]) - np.asarray(x_ball0[:2])
+    along, across = np.dot(delta, forward), np.dot(delta, normal)
+    tolerance = 1e-8 * max(radius, np.linalg.norm(delta), 1.)
+    for direction in (-1, 1):
+        discriminant = radius**2 - (across - direction * radius)**2
+        if discriminant < -tolerance * radius:
+            continue
+        root = (0. if abs(discriminant) <= tolerance * radius
+                else np.sqrt(max(0., discriminant)))
+        for straight in (along - root, along + root):
+            if straight < -tolerance:
+                continue
+            center = (np.asarray(x_ball0[:2]) + max(0., straight) * forward
+                      + direction * radius * normal)
+            radial = np.asarray(ball_goal[:2]) - center
+            theta = np.arctan2(radial[1], radial[0]) + direction * np.pi / 2
+            turn = (direction * (theta - heading)) % (2 * np.pi)
+            if turn > np.pi + 1e-8:
+                continue
+            theta = heading + np.arctan2(np.sin(theta - heading),
+                                        np.cos(theta - heading))
+            candidates.append(theta)
+    candidates = np.sort(candidates)
+    return candidates[np.r_[True, np.diff(candidates) > 1e-9]]
+
+
+def _terminal_turn_candidates(x_ball0, ball_goal, terminal_thetas, radius,
+                              goal_radius):
+    """Add final arcs ending inside the same goal region as the simulation.
+
+    Project the goal onto each current turn circle. If that circle reaches the
+    goal region in at most half a revolution, its endpoint is a valid terminal
+    turn. This tolerates tracking error without tightening the turn radius.
+    """
+    goals = [np.array([ball_goal[0], ball_goal[1], theta], dtype=float)
+             for theta in terminal_thetas]
+    is_terminal_turn = [False] * len(goals)
+    forward = np.array([np.cos(x_ball0[2]), np.sin(x_ball0[2])])
+    normal = np.array([-forward[1], forward[0]])
+    if goal_radius > 0:
+        for direction in (-1, 1):
+            center = np.asarray(x_ball0[:2]) + direction * radius * normal
+            radial = np.asarray(ball_goal[:2]) - center
+            distance = np.linalg.norm(radial)
+            if distance == 0 or abs(distance - radius) > goal_radius:
+                continue
+            theta = np.arctan2(radial[1], radial[0]) + direction * np.pi / 2
+            turn = (direction * (theta - x_ball0[2])) % (2 * np.pi)
+            if turn > np.pi + 1e-8:
+                continue
+            theta = x_ball0[2] + np.arctan2(np.sin(theta - x_ball0[2]),
+                                          np.cos(theta - x_ball0[2]))
+            endpoint = center + radius * radial / distance
+            goal = np.r_[endpoint, theta]
+            matching = [j for j, candidate in enumerate(goals)
+                        if abs(candidate[2] - theta) <= 1e-8]
+            if matching:
+                goals[matching[0]] = goal
+                is_terminal_turn[matching[0]] = True
+            else:
+                goals.append(goal)
+                is_terminal_turn.append(True)
+    goals = np.asarray(goals, dtype=float).reshape(-1, 3)
+    order = np.argsort(goals[:, 2])
+    return goals[order], np.asarray(is_terminal_turn)[order]
+
+
+def _short_intruder_paths(x_ball0, ball_goal, terminal_thetas, radius,
+                          candidate_goals=None):
+    """Keep the short length cluster and reject paths requiring looping turns.
+
+    A jump of more than half a turning circumference separates length clusters.
+    Also cap total turning at pi radians: when every sampled CSC path is long,
+    the shortest of those detours must not become an eligible approach.
+    """
+    lengths = np.full(len(terminal_thetas), np.inf)
+    turns = np.full(len(terminal_thetas), np.inf)
+    for j, theta in enumerate(terminal_thetas):
+        goal_xy = ball_goal[:2] if candidate_goals is None else candidate_goals[j, :2]
+        params = get_dubins_parameters(
+            x_ball0[:2], x_ball0[2], goal_xy, theta, radius,
+        )
+        first_arc, last_arc, straight = params[-3:]
+        turns[j] = first_arc + last_arc
+        lengths[j] = radius * turns[j] + straight
+    ordered_lengths = np.sort(lengths[np.isfinite(lengths)])
+    jumps = np.flatnonzero(np.diff(ordered_lengths) > np.pi * radius)
+    cutoff = float(ordered_lengths[jumps[0]]) if len(jumps) else np.inf
+    eligible = (np.isfinite(lengths) & (lengths <= cutoff + 1e-6)
+                & (turns <= np.pi + 1e-8))
+    return eligible, lengths, turns, cutoff
+
+
+def get_cost_metrics(xi_robots0, x_ball0, ball_goal, v_robot, v_ball,
+                     a_max_robot, a_max_ball, horizon=100,
+                     terminal_thetas=None, *, diagnostics=None, goal_radius=10.0,
+                     selection_mode="slowest_symmetric"):
+    """Filter long intruder routes, partition headings, and select a target.
+
+    The default bank adds headings for short straight-then-terminal-turn paths.
+    Terminal arcs may end within ``goal_radius`` of the goal (10 m by default),
+    preserving the turn radius despite small tracking errors. Use zero for an
+    exact point goal. A supplied heading bank is filtered without augmentation.
+    Only the short length cluster with at most pi radians of total turning is
+    evaluated for defender interception. If no short feasible heading belongs
+    to a robot, it gets no ghost and the simulation uses direct PN.
+
+    ``selection_mode="slowest_symmetric"`` selects each robot's slowest assigned
+    intercept, except that a symmetric centered robot selects the midpoint
+    heading. ``"median"`` selects every robot's median assigned intercept time,
+    using the lower middle time for an even candidate count. Both modes keep
+    the same partition, including ownership of the symmetric midpoint.
+
+    Returns one ``(intercept_time, pose, assigned_intercept_times, theta)``
+    tuple per robot. Infeasible robot/heading pairs are ignored. A robot with
+    no assigned feasible heading gets ``(None, None, [], None)``.
+    If supplied, ``diagnostics`` is populated with the evaluated headings,
+    cost matrix, ownership, and selected indices for plotting these decisions.
+    """
+    if selection_mode not in SELECTION_MODES:
+        raise ValueError(f"selection_mode must be one of {SELECTION_MODES}")
+    if not np.isfinite(goal_radius) or goal_radius < 0:
+        raise ValueError("goal_radius must be finite and nonnegative")
+    radius = v_ball**2 / a_max_ball
+    if terminal_thetas is None:
+        terminal_thetas = _approach_terminal_thetas(x_ball0, ball_goal, radius)
+        candidate_goals, terminal_turns = _terminal_turn_candidates(
+            x_ball0, ball_goal, terminal_thetas, radius, goal_radius,
+        )
+        terminal_thetas = candidate_goals[:, 2]
+    else:
+        candidate_goals = np.array([
+            [ball_goal[0], ball_goal[1], theta] for theta in terminal_thetas
+        ], dtype=float).reshape(-1, 3)
+        terminal_turns = np.zeros(len(candidate_goals), dtype=bool)
+    terminal_thetas = np.asarray(terminal_thetas, dtype=float)
+    xi_robots0 = list(xi_robots0)
+    if not xi_robots0:
+        raise ValueError("xi_robots0 must contain at least one robot pose")
+
+    eligible, path_lengths, path_turns, length_cutoff = _short_intruder_paths(
+        x_ball0, ball_goal, terminal_thetas, radius, candidate_goals,
+    )
+    times = np.full((len(xi_robots0), len(terminal_thetas)), np.inf)
+    poses = [[None] * len(terminal_thetas) for _ in xi_robots0]
+    for j, theta in enumerate(terminal_thetas):
+        if not eligible[j]:
+            continue
+        goal = candidate_goals[j].copy()
+        # The intruder forecast ends at its goal; it cannot be intercepted
+        # later by treating the clamped endpoint as a stationary intruder.
+        candidate_horizon = min(horizon, path_lengths[j] / v_ball)
+        for i, xi_robot0 in enumerate(xi_robots0):
+            result = find_intercept(
+                xi_robot0, x_ball0, goal,
+                v_robot, v_ball, a_max_robot, a_max_ball, candidate_horizon,
+            )
+            if result is not None:
+                times[i, j], poses[i][j], _ = result
+
+    # Each heading belongs to the robot that can intercept it first.
+    owners = np.argmin(times, axis=0)
+    symmetric_center_i = _symmetric_center_robot_index(
+        xi_robots0, x_ball0, ball_goal, terminal_thetas,
+    )
+    center_j = None
+    if symmetric_center_i is not None:
+        center_j = int(np.argmin(np.abs(terminal_thetas -
+                                       0.5 * (terminal_thetas[0] + terminal_thetas[-1]))))
+        if np.isfinite(times[symmetric_center_i, center_j]):
+            # Keep the midpoint heading in the centered defender's partition.
+            owners[center_j] = symmetric_center_i
+
+    results = []
+    selected_indices = np.full(len(xi_robots0), -1, dtype=int)
+    selection_reasons = ["unassigned"] * len(xi_robots0)
+    for i in range(len(xi_robots0)):
+        assigned = [j for j, owner in enumerate(owners)
+                    if owner == i and np.isfinite(times[i, j])]
+        if not assigned:
+            results.append((None, None, [], None))
+            continue
+        if selection_mode == "slowest_symmetric":
+            if i == symmetric_center_i and center_j in assigned:
+                selected_j = center_j
+                selection_reasons[i] = "symmetry"
+            else:
+                selected_j = max(assigned, key=lambda j: times[i, j])
+                selection_reasons[i] = "slowest"
+        else:
+            # Select an actual sample, using the lower median for even counts.
+            ordered = sorted(assigned, key=lambda j: times[i, j])
+            selected_j = ordered[(len(ordered) - 1) // 2]
+            selection_reasons[i] = "median"
+        selected_indices[i] = selected_j
+        results.append((float(times[i, selected_j]), poses[i][selected_j],
+                        [float(times[i, j]) for j in assigned],
+                        float(terminal_thetas[selected_j])))
+    if diagnostics is not None:
+        diagnostics.update(
+            selection_mode=selection_mode,
+            selection_reasons=selection_reasons,
+            terminal_thetas=terminal_thetas.copy(),
+            candidate_goals=candidate_goals.copy(),
+            terminal_turn_mask=terminal_turns,
+            goal_radius=float(goal_radius),
+            eligible_mask=eligible.copy(),
+            intruder_path_lengths=path_lengths,
+            intruder_path_turns=path_turns,
+            short_path_length_cutoff=length_cutoff,
+            intercept_times=times.copy(),
+            owners=np.where(np.isfinite(times).any(axis=0), owners, -1),
+            selected_indices=selected_indices,
+            selected_poses=np.array([
+                np.full(3, np.nan) if result[1] is None else result[1].copy()
+                for result in results
+            ]),
+            robot_poses=np.array(xi_robots0, dtype=float).copy(),
+            ball_pose=np.asarray(x_ball0, dtype=float).copy(),
+            goal=np.asarray(ball_goal, dtype=float).copy(),
+            v_ball=float(v_ball), a_max_ball=float(a_max_ball),
+            horizon=float(horizon),
+        )
+    return results
+
+
+def get_cost_metric(xi_robot0, x_ball0, ball_goal, v_robot, v_ball,
+                    a_max_robot, a_max_ball, horizon=100,
+                    team_robot_poses=None, robot_index=None, goal_radius=10.0,
+                    selection_mode="slowest_symmetric"):
+    """Return a robot's selected assigned intercept and its terminal heading.
+
+    When ``team_robot_poses`` is provided, headings are assigned to the team
+    member with the earliest intercept. ``selection_mode`` chooses the slowest
+    intercept with a symmetric midpoint override, or the median time. Without
+    team poses, the same rule selects among this robot's feasible headings.
+    ``goal_radius`` matches the goal-region tolerance used by the team planner.
+    Results are ``(intercept_time, pose, intercept_times, terminal_theta)``.
+    """
+    if team_robot_poses is not None:
+        if robot_index is None or not 0 <= robot_index < len(team_robot_poses):
+            raise ValueError("robot_index must identify a robot in team_robot_poses")
+        return get_cost_metrics(
+            team_robot_poses, x_ball0, ball_goal, v_robot, v_ball,
+            a_max_robot, a_max_ball, horizon, goal_radius=goal_radius,
+            selection_mode=selection_mode,
+        )[robot_index]
+
+    # A single robot owns every eligible feasible heading; use the same bank.
+    results = get_cost_metrics(
+        [xi_robot0], x_ball0, ball_goal, v_robot, v_ball,
+        a_max_robot, a_max_ball, horizon, goal_radius=goal_radius,
+        selection_mode=selection_mode,
+    )
+    return results[0]
 
 def get_cost_metric_pronav(
     xi_robot0, x_ball0, ball_goal, v_robot, v_ball,
@@ -253,94 +563,31 @@ def get_cost_metric_pronav(
     )
     return result if result is not None else (None, None, None)
 
-def test():
-    x_robot0 = np.array([0, 100, 0])
-    x_ball0 = np.array([1000, 0, np.pi])
-    ball_goal = np.array([0, 0, np.pi/2])
-    
-    v_robot = 30
-    v_ball = 100
-    a_max_robot = 2*P.gravity
-    a_max_ball = P.max_acceleration
-    horizon = 100
+def test(selection_mode="slowest_symmetric"):
+    """Inspect the same heading bank and defender formation as the simulation."""
+    from assignment_plotting import plot_assignment
 
-    t_star, pose, params = find_intercept(
-        x_robot0, x_ball0, ball_goal,
-        v_robot, v_ball, a_max_robot, a_max_ball,
-        horizon,
+    robot_poses = [np.array([0., 100., 0.]),
+                   np.array([0., 0., 0.]),
+                   np.array([0., -100., 0.])]
+    ball_pose = np.array([1000., 0., np.pi])
+    ball_goal = np.array([0., 0., np.pi])
+    diagnostics = {}
+    results = get_cost_metrics(
+        robot_poses, ball_pose, ball_goal, 30., 100.,
+        2 * P.gravity, P.max_acceleration, diagnostics=diagnostics,
+        selection_mode=selection_mode,
     )
-    robot_path = np.array([dubins_state_at_time(x_robot0, pose, t, v_robot, a_max_robot) for t in np.linspace(0, t_star, 100)])
-    ball_path = np.array([dubins_state_at_time(x_ball0, ball_goal, t, v_ball, a_max_ball) for t in np.linspace(0, t_star, 100)])
-    print("Intercept time:", t_star)
-    print("Intercept pose:", pose)
-    
+    for i, result in enumerate(results, 1):
+        if result[3] is None:
+            print(f"Defender {i}: no assigned feasible heading")
+        else:
+            print(f"Defender {i}: {len(result[2])} assigned paths, "
+                  f"{diagnostics['selection_reasons'][i - 1]} terminal heading "
+                  f"{np.rad2deg(result[3]):.1f} deg, "
+                  f"intercept time {result[0]:.2f} s")
+    return plot_assignment(diagnostics)
 
-    # Plot the intercept path
-    plt.plot(robot_path[:, 0], robot_path[:, 1], 'r-', label='Intercept Path')
-    plt.plot(ball_path[:, 0], ball_path[:, 1], 'b-', label='Ball Path')
-    plt.plot(x_robot0[0], x_robot0[1], 'bo', label='Robot Start')
-    plt.plot(x_ball0[0], x_ball0[1], 'go', label='Ball Start')
-    plt.plot(ball_goal[0], ball_goal[1], 'mo', label='Ball Goal')
-    plt.legend()
-    plt.axis('equal')
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.title("Intercept Path")
-    plt.show()
-
-    print('Running for different terminal headings...')
-    terminal_thetas = np.linspace(-np.pi/2, np.pi/2, 10) + np.pi
-    intercept1_times = []
-    intercept2_times = []
-    intercept3_times = []
-    for theta in terminal_thetas:
-        x1_robot0 = np.array([0, 100, 0])
-        x2_robot0 = np.array([0, -100, 0])
-        x3_robot0 = np.array([0,0,0])
-        x_ball0 = np.array([1000, 0, np.pi])
-        ball_goal = np.array([0, 0, theta])
-    
-        v_robot = 30
-        v_ball = 100
-        a_max_robot = 2*P.gravity
-        a_max_ball = P.max_acceleration
-        horizon = 100
-    
-        t1_star, pose, params = find_intercept(
-            x1_robot0, x_ball0, ball_goal,
-            v_robot, v_ball, a_max_robot, a_max_ball,
-            horizon,
-        )
-        t2_star, pose, params = find_intercept(
-            x2_robot0, x_ball0, ball_goal,
-            v_robot, v_ball, a_max_robot, a_max_ball,
-            horizon,
-        )
-        intercept2_times.append(t2_star)
-
-        t3_star, pose, params = find_intercept(
-            x3_robot0, x_ball0, ball_goal,
-            v_robot, v_ball, a_max_robot, a_max_ball,
-            horizon,
-        )
-        intercept3_times.append(t3_star)
-        intercept1_times.append(t1_star)
-
-    robot1_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept1_times)])
-    robot2_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept2_times)])
-    robot3_assigned_terminal_theta = np.rad2deg(terminal_thetas[np.argmin(intercept3_times)])
-    print(f'Robot 1 assignment terminal heading for ball {robot1_assigned_terminal_theta}')
-    print(f'Robot 2 assignment terminal heading for ball {robot2_assigned_terminal_theta}')
-    print(f'Robot 3 assignment terminal heading for ball {robot3_assigned_terminal_theta}')
-    terminal_thetas = np.rad2deg(np.array(terminal_thetas))
-    plt.plot(terminal_thetas, intercept1_times, 'o-', label='Robot 1')
-    plt.plot(terminal_thetas, intercept2_times, 'o-', label='Robot 2')
-    plt.plot(terminal_thetas, intercept3_times, 'o-', label='Robot 3')
-    plt.legend()
-    plt.xlabel("Terminal Theta")
-    plt.ylabel("Intercept Time")
-    plt.title("Intercept Time vs Terminal Theta")
-    plt.show()
 
 def test_as_time_moves():
     x_robot_initial = np.array([0, 100, 0])
@@ -548,5 +795,5 @@ def test_as_time_moves_1(controller="assigned_ghost", plot_times=(0, 3, 6, 8)):
     
 
 if __name__ == "__main__":
-    # test()
-    test_as_time_moves_1(controller="assigned_ghost")
+    test(selection_mode="slowest_symmetric")  # Or "median".
+    # test_as_time_moves_1(controller="assigned_ghost")
