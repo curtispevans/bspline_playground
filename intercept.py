@@ -273,7 +273,8 @@ def _symmetric_center_robot_index(xi_robots0, x_ball0, ball_goal,
 def _default_terminal_thetas(ball_heading):
     """Keep the original 10-heading bank and add its exact midpoint."""
     half_span = np.deg2rad(135)
-    sampled = np.linspace(-half_span, half_span, 30) + ball_heading
+    sampled = np.linspace(-half_span, half_span, 20) + ball_heading
+    # sampled = np.linspace(-np.pi/2, np.pi/2, 20) + ball_heading
     return np.sort(np.append(sampled, ball_heading))
 
 

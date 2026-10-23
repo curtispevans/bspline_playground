@@ -112,7 +112,7 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
         active_ghosts = []
         for robot, ghost in zip(robots, ghosts):
             direct_pn = (ghost is None or
-                         np.linalg.norm(robot.x[:2] - ball.x[:2]) < 1.0*ball_radius)
+                         np.linalg.norm(robot.x[:2] - ball.x[:2]) < 1.25*ball_radius)
             # Choose each robot's mode independently, at every control step.
             controls.append(pronav(
                 robot.x, ball.x if direct_pn else ghost, v_robot,
@@ -200,6 +200,6 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
 
 
 if __name__ == "__main__":
-    sim(terminal_heading=np.radians(270), verbose=True,
-        selection_mode="slowest_symmetric")
-        # selection_mode="median")  # Or "median".
+    sim(terminal_heading=np.radians(290), verbose=True,
+        # selection_mode="slowest_symmetric")
+        selection_mode="median")  # Or "median".
