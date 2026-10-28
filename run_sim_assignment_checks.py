@@ -1,4 +1,4 @@
-"""Run the regression checks and heading scenarios in sim_assignment_algorithm.md.
+"""Run regression checks and legacy Dubins heading scenarios.
 
 Usage:
     python3 run_sim_assignment_checks.py
@@ -40,11 +40,12 @@ def main(argv=None):
 
     print("Running regression checks...", flush=True)
     suite = unittest.defaultTestLoader.loadTestsFromNames([
-        "test_sim_assignment", "test_assignment_plotting", "test_short_intruder_paths",
+        "test_sim_assignment", "test_ball_path_manager",
+        "test_assignment_plotting", "test_short_intruder_paths",
     ])
     regression = unittest.TextTestRunner(stream=sys.stdout, verbosity=2).run(suite)
 
-    print("\nRunning heading scenarios with the current simulation defaults.")
+    print("\nRunning heading scenarios with ball_policy='dubins'.")
     print("PASS means a defender intercepts; MISS means no intercept.")
     interceptions = misses = errors = 0
     for heading in headings:
@@ -52,7 +53,8 @@ def main(argv=None):
         print(f"\nRunning {degrees:.4f} deg...", flush=True)
         try:
             run = sim(terminal_heading=float(heading),
-                      plot=False, animate=False, verbose=False, selection_mode="median")
+                      plot=False, animate=False, verbose=False, selection_mode="median",
+                      ball_policy="dubins")
             closest = min(run["closest_approach"])
             if run["hit_robot"] is not None:
                 status = "PASS"
@@ -62,6 +64,12 @@ def main(argv=None):
                 misses += 1
             print(f"{degrees:8.4f} deg | {status} | {run['outcome']} | "
                   f"closest = {closest:.2f} m", flush=True)
+            timing = run["timing"]
+            planning_ms = timing["planning_seconds"] * 1000
+            print(f"  Compute: {timing['simulation_seconds']:.3f} s wall | "
+                  f"{timing['realtime_factor']:.2f}x real time | "
+                  f"planner mean/max: {planning_ms.mean():.2f}/{planning_ms.max():.2f} ms "
+                  f"({len(planning_ms)} calls)", flush=True)
         except Exception as exc:
             errors += 1
             print(f"{degrees:8.4f} deg | ERROR | {type(exc).__name__}: {exc}",

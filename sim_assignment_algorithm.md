@@ -2,9 +2,11 @@
 
 This simulation uses three defenders, periodic selection of stationary ghost
 targets, and proportional navigation (PN). Each defender chooses its own ghost
-independently. The moving ball follows a Dubins path toward the goal. Close to the
-ball, a defender switches from its ghost to PN against the ball's measured pose
-and velocity.
+independently. By default the moving ball applies maximum left normal
+acceleration for two seconds, then switches to PN toward the goal position.
+Close to the ball, a defender switches from its ghost to PN against the ball's
+measured pose and velocity. Defender forecasts remain hypothetical Dubins
+approaches, which can differ from the ball's actual maneuver and PN trajectory.
 
 The planner and guidance remain the simple approach from `sim_assignment.py`.
 The plots and returned histories make successes and misses easier to inspect.
@@ -16,8 +18,10 @@ This approach does **not yet guarantee an intercept for every terminal heading**
 | --- | --- |
 | Ball start `[x, y, heading]` | `[1000, 0, pi]` |
 | Defender starts | `[0, 100, 0]`, `[0, 0, 0]`, `[0, -100, 0]` |
-| Ball goal | `[0, 0, terminal_heading]` |
-| Actual ball terminal heading | `4.422615269729036` rad |
+| Ball goal position | `[0, 0]` |
+| Ball policy | `"max_accel_pronav"` |
+| Ball maneuver duration / turn direction / PN gain | 2 s / +1 (left) / 3 |
+| Terminal heading for legacy `ball_policy="dubins"` | `4.422615269729036` rad |
 | Defender / ball speed | 30 / 100 m/s |
 | Defender / ball maximum normal acceleration | 19.62 / 39.24 m/s² |
 | Integration step, `P.Ts` | 0.01 s |
@@ -35,9 +39,39 @@ heading_dot = normal_acceleration / speed
 
 Normal acceleration is limited to the vehicle's configured maximum. Its minimum
 turn radius is `R = speed**2 / max_acceleration`: approximately 45.87 m for a
-defender and 254.84 m for the ball. A `PathManager` steers the ball along its
-initially planned Dubins path. Defenders use PN; they do not follow robot
+defender and 254.84 m for the ball. Defenders use PN; they do not follow robot
 `PathManager` instances.
+
+## Ball guidance
+
+`MaxAccelerationPronavPathManager` in `path_manager.py` has three states:
+
+1. `maneuver`: command `ball_turn_direction * ball.max_acceleration` at every
+   integration step. Speed remains constant; +1 turns left (CCW), -1 right.
+2. `pronav`: once `ball_maneuver_duration` seconds have elapsed, permanently
+   switch to `pronav` against the stationary goal, using
+   `ball_navigation_constant` and the ball's acceleration limit. The switch
+   occurs on the first control step at or after the duration. Zero duration
+   starts directly in PN. The final heading is determined by this flight.
+3. `complete`: if the measured position is within `goal_radius` during either
+   phase, mark the manager done and return zero normal acceleration. A caller
+   using the manager directly should stop integrating when it is done.
+
+For example:
+
+```python
+sim(ball_maneuver_duration=2.0, ball_turn_direction=1,
+    ball_navigation_constant=3.0)
+sim(ball_maneuver_duration=3.0, ball_turn_direction=-1)
+sim(ball_maneuver_duration=0.0)  # PN from the start.
+sim(ball_policy="dubins", terminal_heading=4.422615269729036)
+```
+
+Only the legacy Dubins policy uses `terminal_heading` to control actual ball
+motion. Defender planning still samples its own terminal-heading bank using
+the measured ball pose and goal position. The actual maneuver settings are
+not supplied to that planner. The heading-based unknown-heading demonstration
+in `sim_assignment_unknown_heading.py` continues to use its Dubins ball model.
 
 ## 1. Pick an initial ghost for each defender
 
@@ -227,7 +261,7 @@ Its final `test(selection_mode=...)` call offers the same two choices.
 ```python
 from sim_assignment import sim
 
-result = sim(terminal_heading=4.422615269729036,
+result = sim(ball_maneuver_duration=2.0, ball_turn_direction=1,
              update_interval=0.5,
              plot=True, animate=True)
 ```
@@ -245,6 +279,10 @@ The returned dictionary includes:
 | Key | Meaning |
 | --- | --- |
 | `selection_mode` | Target selection rule used for the run |
+| `ball_policy` | Actual ball policy: `max_accel_pronav` or `dubins` |
+| `ball_controls` | Ball normal acceleration for the preceding integration interval; initial value is NaN |
+| `ball_path_states` | Ball manager state for the preceding integration interval; initial value is `initial` |
+| `ball_switch_time` | Elapsed time of first PN command; `None` if PN was never used or policy is Dubins |
 | `hit_robot`, `hit_time` | Defender number (1–3) and intercept time; `None` on a miss |
 | `ball_reached_goal`, `outcome` | Goal-arrival flag and readable termination reason |
 | `times`, `ball_poses` | Recorded time and ball pose, including time zero |
@@ -255,7 +293,20 @@ The returned dictionary includes:
 | `closest_approach`, `closest_approach_times` | Minimum sampled range and its time for each defender |
 | `replan_times` | Actual ghost-refresh times, excluding initialization |
 | `assignment_history` | Initial plan and replans, with times, candidate headings, exact ownership (`-1` means unassigned), full cost matrices, selected indices and ghosts, and forecast inputs |
+| `timing` | Wall-clock compute duration, individual planner durations, initial/replan statistics, real-time factor, and separate display-call durations; all durations are seconds |
 | `replay` | Figure/animation pair when replay is requested; otherwise `None` |
+
+Timing is printed with `verbose=True`. For measurements without console or
+figure overhead, run with `plot=False, animate=False, verbose=False` and inspect
+`result["timing"]`. `simulation_seconds` covers setup, planning, guidance,
+dynamics, and recording, ending before any figures are created. It excludes
+module imports. `planning_seconds[0]` is the initial assignment; subsequent
+entries align with `replan_times`. Each recorded plan also stores its own
+`compute_seconds`. `realtime_factor` is simulated seconds divided by compute
+seconds, so values greater than one indicate faster-than-real-time computation.
+`plot_seconds` and `animation_seconds` measure the display calls, including any
+time spent waiting for windows to close; they are zero when disabled.
+The check runner prints compute and planner timings for each heading scenario.
 
 Each recorded plan also includes `eligible_mask`, `intruder_path_lengths`,
 `intruder_path_turns`, and `short_path_length_cutoff` for inspecting the filter.
@@ -285,12 +336,13 @@ PN follows the current moving ball; its target is not stored as a fixed diamond.
 
 ## What remains before expecting an intercept every time
 
-1. **The predicted ball path can differ from the actual path.** The real ball uses
-   `terminal_heading`; the cost metric searches its own heading bank. A fastest
-   ghost on a hypothetical path may never be visited by the real ball. If the
-   actual terminal heading is known, the next controlled experiment should plan
-   against that heading. If it is unknown, choosing among hypotheses requires
-   evidence from observed motion.
+1. **The predicted ball path can differ from the actual path.** The real ball
+   uses a timed maximum-acceleration maneuver followed by PN; the cost metric
+   searches its own Dubins heading bank. A ghost on a hypothetical path may
+   never be visited by the real ball. Planning against the new policy would
+   require candidate maneuver durations and directions, with PN rollouts after
+   each candidate switch. The legacy Dubins mode also uses a specific actual
+   terminal heading that can differ from the planner's hypotheses.
 2. **The planning controller and executed controller differ.** The cost predicts
    a Dubins traversal with a required terminal heading; execution uses saturated
    PN toward a fixed point and later switches to the moving ball. A Dubins
@@ -306,15 +358,16 @@ PN follows the current moving ball; its target is not stored as a fixed diamond.
    limits make some initial conditions infeasible. Test a stated set of starts,
    headings, and limits, and retain the miss cases as regressions.
 
-Run all ten documented heading scenarios and the three regression checks with:
+Run the regression suite, including the new ball-policy checks, and all ten
+documented legacy Dubins heading scenarios with:
 
 ```sh
 python3 run_sim_assignment_checks.py
 ```
 
-The script uses the current simulation defaults, disables figures, and prints
-each outcome and closest range. It tests nine evenly spaced headings from 90
-to 270 degrees plus the exact default heading `4.422615269729036` radians.
+The heading sweep explicitly uses `ball_policy="dubins"`, disables figures,
+and prints each outcome and closest range. It tests nine evenly spaced headings
+from 90 to 270 degrees plus `4.422615269729036` radians.
 The full sweep can take a minute or two. It exits with status 0 only when the
 regression checks pass and every selected scenario intercepts; a miss or error
 produces status 1.
@@ -348,7 +401,7 @@ smallest sampled distance across all three defenders before termination.
 Run the focused regression checks with:
 
 ```sh
-MPLBACKEND=Agg python3 -m unittest test_sim_assignment test_assignment_plotting test_short_intruder_paths -v
+MPLBACKEND=Agg python3 -m unittest test_ball_path_manager test_sim_assignment test_assignment_plotting test_short_intruder_paths -v
 ```
 
 All three original focused regression checks passed in that earlier rerun: independent

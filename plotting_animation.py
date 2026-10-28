@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.collections import LineCollection
 from matplotlib.widgets import Button, Slider
 
 from assignment_plotting import (DEFENDER_COLORS, assignment_at_time,
@@ -9,10 +10,21 @@ from assignment_plotting import (DEFENDER_COLORS, assignment_at_time,
                                  draw_assignment_paths, selection_description)
 
 
+def _draw_candidate_paths(ax, candidate_paths):
+    """Keep the complete heading bank visible beneath the recorded motion."""
+    if candidate_paths:
+        ax.add_collection(LineCollection(
+            [path[:, :2] for path in candidate_paths],
+            colors="#6d7e94", linewidths=1.2, alpha=0.6, zorder=1,
+            label="Possible intruder trajectories",
+        ))
+
+
 def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
                     update_events, goal_xy, hit_robot, save_path=None, *,
                     title="Interception with an unknown intruder terminal heading",
-                    final_status=None, show=True, assignment_history=None):
+                    final_status=None, show=True, assignment_history=None,
+                    candidate_paths=None):
     """Plot four snapshots; update events are (time, heading or None, ...).
 
     ``None`` headings represent periodic ghost replanning without heading
@@ -20,11 +32,15 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
     render a saved figure without opening a window.
     Recorded assignments add the candidate intruder envelope and selected paths
     from the plan active at each snapshot.
+    ``candidate_paths`` supplies a fixed bank of sampled (x, y[, heading])
+    trajectories when the simulation does not record assignment partitions.
     """
     times = np.asarray(times)
     ball_poses = np.asarray(ball_poses)
     robot_poses = [np.asarray(poses) for poses in robot_poses]
     ghost_poses = [np.asarray(poses) for poses in ghost_poses]
+    candidate_paths = ([] if candidate_paths is None else
+                       [np.asarray(path) for path in candidate_paths])
     final_time = times[-1]
     first_update = update_events[0][0] if update_events else 0.25 * final_time
     snapshot_times = [0., min(final_time, first_update + 0.15),
@@ -44,6 +60,8 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
                  fontsize=17, fontweight="semibold", y=0.98)
     subtitle = ("Candidate intruder paths use their assigned defender's color | diamonds: selected intercepts"
                 if assignment_history else
+                "Gray paths: possible intruder trajectories | diamonds: stationary PN ghosts"
+                if candidate_paths else
                 "Four moments from the same run | diamonds: stationary PN ghosts")
     fig.text(0.5, 0.93, subtitle,
              ha="center", fontsize=11)
@@ -54,6 +72,7 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
                              for poses in ghost_poses),
                            assignment_positions([plan for plan in snapshot_plans
                                                  if plan is not None]),
+                           *(path[:, :2] for path in candidate_paths),
                            np.asarray(goal_xy)[None, :]])
     padding = 40.
     xlimits = (np.min(positions[:, 0]) - padding,
@@ -76,6 +95,7 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
         else:
             stage = "Guidance toward ghosts or the intruder"
         ax.set_title(f"t = {current_t:.2f} s  |  {stage}", fontsize=11)
+        _draw_candidate_paths(ax, candidate_paths)
         plan = snapshot_plans[panel]
         if plan is not None:
             draw_assignment_paths(ax, plan)
@@ -138,10 +158,14 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
         handles += assignment_legend(assignment_history[0])
         labels = [handle.get_label() for handle in handles]
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.905),
-               ncol=4 if assignment_history else 6, frameon=False, fontsize=9)
+               ncol=4 if assignment_history or candidate_paths else 6,
+               frameon=False, fontsize=9)
     footer = (f"Thin colored paths: assigned intruder candidates; bold dashed paths: {selection_description(assignment_history[0])}.\n"
               "Pale recorded motion is hindsight. Dashed connectors: active fixed ghosts; dotted connectors: direct PN."
               if assignment_history else
+              "Gray curves show all candidate headings from the original intruder start.\n"
+              "Pale recorded motion is hindsight. Dashed connectors: active fixed ghosts; dotted connectors: direct PN."
+              if candidate_paths else
               "Pale paths show the completed run, for display only. Dashed lines "
               "point to fixed ghosts; dotted lines show direct PN to the intruder.")
     fig.text(0.5, 0.04,
@@ -155,7 +179,7 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
 
 
 def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, target,
-                       *, assignment_history=None, show=True):
+                       *, assignment_history=None, show=True, candidate_paths=None):
     """Show a replayable simulation with a frame slider and step controls.
 
     Use the slider or the left/right arrow keys to inspect individual frames.
@@ -163,6 +187,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     bright lines show the trail up to the selected frame.
     With recorded assignments, the intruder envelope and a cost panel update
     together when stepping across a replan.
+    A fixed ``candidate_paths`` bank remains visible throughout playback and
+    slider navigation, including paths beyond the end of the actual run.
     """
     colors = DEFENDER_COLORS
     labels = ("Defender 1", "Defender 2", "Defender 3")
@@ -170,6 +196,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     if n_frames == 0:
         print("No simulation frames were recorded.")
         return None, None
+    candidate_paths = ([] if candidate_paths is None else
+                       [np.asarray(path) for path in candidate_paths])
 
     if assignment_history:
         fig, (ax, cost_ax) = plt.subplots(1, 2, figsize=(17, 8),
@@ -182,7 +210,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     all_xy = [ball_poses[:, :2], *(poses[:, :2] for poses in robot_poses),
               *(poses[np.isfinite(poses[:, :2]).all(axis=1), :2]
                 for poses in ghost_poses), target[None, :2],
-              assignment_positions(assignment_history)]
+              assignment_positions(assignment_history),
+              *(path[:, :2] for path in candidate_paths)]
     all_xy = np.vstack(all_xy)
     span = np.ptp(all_xy, axis=0)
     margin = max(0.08 * float(np.max(span)), 20.0)
@@ -193,6 +222,7 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     ax.set_ylabel("Y")
     ax.set_title("Defender and Intruder Simulation — replay controls below")
     ax.grid(True, alpha=0.25)
+    _draw_candidate_paths(ax, candidate_paths)
     ax.plot(target[0], target[1], marker="*", color="black", markersize=14, label="Intruder goal")
 
     trail_lines = []

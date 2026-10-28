@@ -73,6 +73,58 @@ class AssignmentSimulationTests(unittest.TestCase):
                 for call in planner.call_args_list:
                     self.assertEqual(call.kwargs["selection_mode"], mode)
 
+    def test_timing_separates_planner_compute_and_display_calls(self):
+        clock = [100.]
+        durations = iter([0.02, 0.03, 0.04])
+
+        def planner(*args, diagnostics, **kwargs):
+            clock[0] += next(durations)
+            diagnostics["selection_mode"] = kwargs["selection_mode"]
+            return [(None, None, [], None)] * 3
+
+        def plot(*args, **kwargs):
+            clock[0] += 100.
+
+        def animate(*args, **kwargs):
+            clock[0] += 200.
+            return None, None
+
+        with patch("sim_assignment.perf_counter", side_effect=lambda: clock[0]), \
+                patch("sim_assignment.get_cost_metrics", side_effect=planner), \
+                patch("sim_assignment.plot_simulation", side_effect=plot), \
+                patch("sim_assignment.animate_simulation", side_effect=animate):
+            result = sim(verbose=False, horizon=0.07, update_interval=0.025,
+                         plot_path=None)
+
+        timing = result["timing"]
+        np.testing.assert_allclose(timing["planning_seconds"], [0.02, 0.03, 0.04])
+        np.testing.assert_allclose(
+            [plan["compute_seconds"] for plan in result["assignment_history"]],
+            timing["planning_seconds"],
+        )
+        self.assertAlmostEqual(timing["simulation_seconds"], 0.09)
+        self.assertAlmostEqual(timing["planning_total_seconds"], 0.09)
+        self.assertAlmostEqual(timing["initial_planning_seconds"], 0.02)
+        self.assertAlmostEqual(timing["replan_mean_seconds"], 0.035)
+        self.assertAlmostEqual(timing["replan_max_seconds"], 0.04)
+        self.assertAlmostEqual(timing["realtime_factor"], 0.07 / 0.09)
+        self.assertAlmostEqual(timing["plot_seconds"], 100.)
+        self.assertAlmostEqual(timing["animation_seconds"], 200.)
+
+    def test_timing_handles_a_run_without_replanning_or_figures(self):
+        with patch("sim_assignment.get_cost_metrics",
+                   return_value=[(None, None, [], None)] * 3):
+            result = sim(plot=False, animate=False, verbose=False, horizon=P.Ts)
+
+        timing = result["timing"]
+        self.assertEqual(len(timing["planning_seconds"]), 1)
+        self.assertIsNone(timing["replan_mean_seconds"])
+        self.assertIsNone(timing["replan_max_seconds"])
+        self.assertEqual(timing["plot_seconds"], 0.)
+        self.assertEqual(timing["animation_seconds"], 0.)
+        self.assertGreater(timing["simulation_seconds"], 0.)
+        self.assertGreaterEqual(timing["simulation_seconds"], timing["planning_total_seconds"])
+
 
 if __name__ == "__main__":
     unittest.main()

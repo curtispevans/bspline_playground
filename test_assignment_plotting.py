@@ -12,7 +12,8 @@ from assignment_plotting import (UNASSIGNED_COLOR, assignment_at_time,
                                  assignment_summary, draw_assignment_costs,
                                  draw_assignment_paths)
 from intercept import get_cost_metrics
-from plotting_animation import animate_simulation
+from plotting_animation import animate_simulation, plot_simulation
+from sim_assignment_unknown_heading import sim as sim_unknown_heading
 
 
 def recorded_plan(costs, selection_mode="median", symmetric=True):
@@ -143,6 +144,72 @@ class AssignmentPlottingTests(unittest.TestCase):
             self.assertLess(fig.axes[1].get_ylim()[1], 9.)
             self.assertEqual(len(fig.axes[0].lines), original_line_count)
             animation.event_source.stop()
+
+    def test_unknown_heading_simulation_passes_the_entire_bank_to_both_displays(self):
+        headings = np.array([1.2, 2., np.pi, 4., 4.9])
+        with patch("sim_assignment_unknown_heading.find_intercept", return_value=None), \
+                patch("sim_assignment_unknown_heading.plot_simulation") as plot, \
+                patch("sim_assignment_unknown_heading.animate_simulation",
+                      return_value=(None, None)) as animate:
+            result = sim_unknown_heading(
+                candidate_headings=headings, true_terminal_heading=2.2,
+                update_ghosts=False, verbose=False, plot_path=None,
+            )
+
+        paths = result["candidate_paths"]
+        self.assertEqual(len(paths), len(headings))
+        self.assertIs(plot.call_args.kwargs["candidate_paths"], paths)
+        self.assertIs(animate.call_args.kwargs["candidate_paths"], paths)
+        np.testing.assert_array_equal(result["candidate_headings"], headings)
+        for path, heading in zip(paths, headings):
+            self.assertTrue(np.isfinite(path).all())
+            np.testing.assert_allclose(path[0, :2], [1000., 0.], atol=1e-9)
+            np.testing.assert_allclose(path[-1, :2], [0., 0.], atol=1e-9)
+            self.assertAlmostEqual(np.sin(path[-1, 2] - heading), 0.)
+            self.assertAlmostEqual(np.cos(path[-1, 2] - heading), 1.)
+
+    def test_candidate_paths_fit_snapshots_and_persist_when_scrubbing_replay(self):
+        times = np.arange(5) * 0.01
+        robots = [np.tile([0., y, 0.], (5, 1)) for y in [100., 0., -100.]]
+        ball = np.tile([1000., 0., np.pi], (5, 1))
+        ghosts = [np.full((5, 3), np.nan) for _ in robots]
+        controls = [np.zeros(5) for _ in robots]
+        goal = np.array([0., 0., np.pi])
+        paths = [np.array([[1000., 0.], [600., y], [-200., y], [0., 0.]])
+                 for y in [-700., 700.]]
+
+        def candidate_collection(ax):
+            collections = [artist for artist in ax.collections
+                           if artist.get_label() == "Possible intruder trajectories"]
+            self.assertEqual(len(collections), 1)
+            np.testing.assert_allclose(collections[0].get_segments(), paths)
+            self.assertLess(ax.get_xlim()[0], -200.)
+            self.assertGreater(ax.get_xlim()[1], 1000.)
+            self.assertLess(ax.get_ylim()[0], -700.)
+            self.assertGreater(ax.get_ylim()[1], 700.)
+            return collections[0]
+
+        snapshots = plot_simulation(
+            times, robots, ball, ghosts, [], goal[:2], None,
+            candidate_paths=paths, show=False,
+        )
+        for ax in snapshots.axes:
+            candidate_collection(ax)
+        self.assertIn("Possible intruder trajectories",
+                      [text.get_text() for text in snapshots.legends[0].get_texts()])
+
+        fig, animation = animate_simulation(
+            times, robots, ball, ghosts, controls, goal,
+            candidate_paths=paths, show=False,
+        )
+        original = candidate_collection(fig.axes[0])
+        slider = fig._simulation_widgets[0]
+        for frame in (4, 2, 0):
+            slider.set_val(frame)
+            self.assertIs(candidate_collection(fig.axes[0]), original)
+        self.assertIn("Possible intruder trajectories",
+                      [text.get_text() for text in fig.legends[0].get_texts()])
+        animation.event_source.stop()
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from intercept_fixed import (find_pronav_intercept,
 from path_follower import get_dubins_parameters
 from path_manager import PathManager, dubins_state_at_time
 from pronav import pronav
-from sim_assignment_pn import animate_simulation, _pose_for_history
+from sim_assignment_pn import _pose_for_history
 from plotting_animation import plot_simulation, animate_simulation
 
 
@@ -35,6 +35,8 @@ def sim(animate=True, update_ghosts=True,
     possible. ``error_threshold`` is measured position disagreement between
     the selected candidate and the ball, in the simulation's distance units.
     A defender without a feasible fixed ghost uses direct PN to the intruder.
+    Snapshots and replay show every candidate trajectory from the original
+    intruder start through arrival at the goal (or the planning horizon).
     Set ``verbose=False`` to suppress simulation progress messages.
     """
     def log(*args, **kwargs):
@@ -128,6 +130,7 @@ def sim(animate=True, update_ghosts=True,
     # the observed position, which can switch to a different path family.
     ball_radius = v_ball**2 / a_max_ball
     candidate_arrivals = []
+    candidate_paths = []
     for j in range(len(candidate_headings)):
         path = get_dubins_parameters(
             ball_initial[:2], ball_initial[2], goal_xy,
@@ -137,6 +140,13 @@ def sim(animate=True, update_ghosts=True,
         candidate_arrivals.append(
             (ball_radius * (first_arc + second_arc) + straight) / v_ball
         )
+        sample_times = np.linspace(0., min(candidate_arrivals[-1], horizon), 160)
+        candidate_paths.append(np.array([
+            dubins_state_at_time(
+                ball_initial, candidate_goal(j), instant, v_ball, a_max_ball,
+            )
+            for instant in sample_times
+        ]))
 
     active_heading_index = None
     update_events = []
@@ -282,17 +292,21 @@ def sim(animate=True, update_ghosts=True,
                         [np.asarray(history) for history in robot_history],
                         ball_history,
                         [np.asarray(history) for history in ghost_history],
-                        update_events, goal_xy, hit_robot, plot_path)
-        log(f"Saved static plot to {plot_path}")
+                        update_events, goal_xy, hit_robot, plot_path,
+                        candidate_paths=candidate_paths)
+        if plot_path is not None:
+            log(f"Saved static plot to {plot_path}")
 
+    replay = None
     if animate:
-        animate_simulation(
+        replay = animate_simulation(
             np.asarray(times),
             [np.asarray(history) for history in robot_history],
             np.asarray(ball_history),
             [np.asarray(history) for history in ghost_history],
             [np.asarray(history) for history in control_history],
             true_target,
+            candidate_paths=candidate_paths,
         )
     return {
         "hit_robot": hit_robot,
@@ -300,6 +314,9 @@ def sim(animate=True, update_ghosts=True,
         "ball_reached_goal": hit_target,
         "heading_updates": update_events,
         "initial_heading_indices": initial_indices,
+        "candidate_headings": candidate_headings.copy(),
+        "candidate_paths": candidate_paths,
+        "replay": replay,
     }
 
 

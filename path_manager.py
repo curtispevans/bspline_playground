@@ -3,6 +3,87 @@ from numpy.typing import NDArray
 import params as P
 from path_follower import get_dubins_parameters, rotation_matrix
 from dynamics import SimpleDynamics
+from pronav import pronav
+
+
+class MaxAccelerationPronavPathManager:
+    """Apply maximum normal acceleration, then PN toward a fixed goal.
+
+    Call ``update(vehicle)`` once before each ``vehicle.update(control)``.
+    The maneuver lasts ``maneuver_duration`` seconds, rounded up to the next
+    control step. ``turn_direction=1`` turns left (CCW); ``-1`` turns right.
+    Speed stays constant. PN targets only the goal position, with no prescribed
+    arrival heading, and uses the vehicle's normal-acceleration limit.
+
+    ``path_state`` is ``"maneuver"``, ``"pronav"``, or ``"complete"``.
+    ``switch_time`` records the actual elapsed time of the first PN command.
+    Reaching ``goal_radius`` completes either phase. A completed manager returns
+    zero normal acceleration; the caller should stop advancing the vehicle.
+    """
+
+    def __init__(
+        self,
+        goal_position: NDArray[np.float64],
+        maneuver_duration: float = 2.0,
+        turn_direction: int = 1,
+        navigation_constant: float = 3.0,
+        goal_radius: float = 10.0,
+    ):
+        goal_position = np.asarray(goal_position, dtype=float)
+        if goal_position.shape != (2,) or not np.all(np.isfinite(goal_position)):
+            raise ValueError("goal_position must contain two finite coordinates")
+        if not np.isfinite(maneuver_duration) or maneuver_duration < 0:
+            raise ValueError("maneuver_duration must be finite and nonnegative")
+        if turn_direction not in (-1, 1):
+            raise ValueError("turn_direction must be +1 (left) or -1 (right)")
+        if not np.isfinite(navigation_constant) or navigation_constant <= 0:
+            raise ValueError("navigation_constant must be finite and positive")
+        if not np.isfinite(goal_radius) or goal_radius <= 0:
+            raise ValueError("goal_radius must be finite and positive")
+
+        self.goal_state = np.r_[goal_position, 0.0]
+        self.maneuver_duration = float(maneuver_duration)
+        self.turn_direction = int(turn_direction)
+        self.navigation_constant = float(navigation_constant)
+        self.goal_radius = float(goal_radius)
+        self.elapsed_time = 0.0
+        self.switch_time = None
+        self.path_state = "maneuver" if maneuver_duration > 0 else "pronav"
+        self.done = False
+
+    def update(self, vehicle: SimpleDynamics) -> NDArray[np.float64]:
+        if self.done:
+            return np.array([0.0])
+        if (not np.all(np.isfinite(
+                [vehicle.v0, vehicle.max_acceleration, vehicle.Ts]))
+                or min(vehicle.v0, vehicle.max_acceleration, vehicle.Ts) <= 0):
+            raise ValueError(
+                "Vehicle speed, acceleration limit and step must be positive and finite"
+            )
+
+        if np.linalg.norm(vehicle.x[:2] - self.goal_state[:2]) < self.goal_radius:
+            self.path_state = "complete"
+            self.done = True
+            return np.array([0.0])
+
+        # Allow for roundoff from accumulating integration steps at a deadline.
+        if (self.path_state == "maneuver" and
+                self.elapsed_time + 1e-12 >= self.maneuver_duration):
+            self.path_state = "pronav"
+
+        if self.path_state == "maneuver":
+            control = np.array([self.turn_direction * vehicle.max_acceleration])
+        else:
+            if self.switch_time is None:
+                self.switch_time = self.elapsed_time
+            control = pronav(
+                vehicle.x, self.goal_state, robot_speed=vehicle.v0,
+                ghost_speed=0.0, navigation_constant=self.navigation_constant,
+                max_acceleration=vehicle.max_acceleration,
+            )
+
+        self.elapsed_time += vehicle.Ts
+        return control
 
 
 class PathManager:
