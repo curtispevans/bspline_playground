@@ -1,8 +1,8 @@
 # Algorithm in `sim_assignment.py`
 
-This simulation uses three defenders, periodic selection of stationary ghost
-targets, and proportional navigation (PN). Each defender chooses its own ghost
-independently. By default the moving ball applies maximum left normal
+This simulation uses a configurable team of defenders, periodic selection of
+stationary ghost targets, and proportional navigation (PN). Each defender chooses
+its own ghost independently. By default the moving ball applies maximum left normal
 acceleration for two seconds, then switches to PN toward the goal position.
 Close to the ball, a defender switches from its ghost to PN against the ball's
 measured pose and velocity. Defender forecasts remain hypothetical Dubins
@@ -41,6 +41,36 @@ Normal acceleration is limited to the vehicle's configured maximum. Its minimum
 turn radius is `R = speed**2 / max_acceleration`: approximately 45.87 m for a
 defender and 254.84 m for the ball. Defenders use PN; they do not follow robot
 `PathManager` instances.
+
+Set `num_defenders` and `defender_start=(x, y)` to generate a vertical formation
+centered at that starting position. `defender_spacing` is the distance between
+neighbors, in meters. Defenders start from highest to lowest y, all facing heading
+zero. The defaults (3 defenders, center `(0, 0)`, spacing 100 m) give the three
+starts above. A single defender starts exactly at the center; zero spacing places
+all defenders at the same position. These settings are also available at the
+bottom of `sim_assignment.py` when running the script directly.
+
+```python
+from sim_assignment import sim
+
+result = sim(num_defenders=5, defender_start=(50., 20.), defender_spacing=100.)
+# For a run without figures:
+result = sim(num_defenders=5, defender_start=(50., 20.), plot=False, animate=False)
+```
+
+For individual positions and headings, pass `robot_initial` instead. Each row is
+`[x, y, heading]`, with headings in radians. Lists and NumPy arrays are accepted;
+the input is copied and must have shape `(N, 3)` with finite entries. The row count
+sets the number of defenders; if `num_defenders` is also supplied, it must match.
+`defender_start` and `defender_spacing` apply only to generated formations. All
+defenders share the default speed and acceleration limit. Histories and one-based
+defender IDs follow input order, and snapshots and replay display the entire team.
+Colors cycle after ten defenders.
+
+```python
+starts = [[0., y, 0.] for y in [200., 100., 0., -100., -200.]]
+result = sim(robot_initial=starts)
+```
 
 ## Ball guidance
 
@@ -81,6 +111,8 @@ time owns that heading. This divides the heading sweep into regions; headings
 are sampled, so each boundary falls between adjacent samples where ownership
 changes. When the defender poses and candidate sweep are mirror-symmetric around
 the ball-to-goal axis, the centered defender owns the exact midpoint heading.
+The symmetry check includes the entire team, so a symmetric trio inside a larger
+asymmetric formation does not trigger this override.
 Choose the target selection rule with `selection_mode`:
 
 | Mode | Target selection |

@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from assignment_plotting import (UNASSIGNED_COLOR, assignment_at_time,
+from assignment_plotting import (DEFENDER_COLORS, UNASSIGNED_COLOR, assignment_at_time,
                                  assignment_summary, draw_assignment_costs,
                                  draw_assignment_paths)
 from intercept import get_cost_metrics
@@ -16,12 +16,12 @@ from plotting_animation import animate_simulation, plot_simulation
 from sim_assignment_unknown_heading import sim as sim_unknown_heading
 
 
-def recorded_plan(costs, selection_mode="median", symmetric=True):
+def recorded_plan(costs, selection_mode="median", symmetric=True, robot_poses=None):
     """Make a real planner record with controlled interception predictions."""
     costs = np.asarray(costs, dtype=float)
     headings = np.linspace(np.pi / 2, 3 * np.pi / 2, costs.shape[1])
-    robots = [np.array([0., 100., 0.]), np.array([0., 0., 0.]),
-              np.array([0., -100., 0.])]
+    robots = ([np.array([0., 100., 0.]), np.array([0., 0., 0.]),
+               np.array([0., -100., 0.])] if robot_poses is None else robot_poses)
     if not symmetric:
         robots[1][2] = 0.2
     predictions = [
@@ -44,6 +44,96 @@ def recorded_plan(costs, selection_mode="median", symmetric=True):
 class AssignmentPlottingTests(unittest.TestCase):
     def tearDown(self):
         plt.close("all")
+
+    def test_planner_partitions_headings_for_any_team_size(self):
+        for count in (1, 2, 5, 12):
+            with self.subTest(count=count):
+                robots = [np.array([10., 30. * i, 0.1]) for i in range(count)]
+                costs = np.full((count, 3), 20.)
+                for j in range(3):
+                    costs[j % count, j] = j + 1.
+                results, plan = recorded_plan(costs, robot_poses=robots)
+                self.assertEqual(len(results), count)
+                self.assertEqual(plan["intercept_times"].shape, (count, 3))
+                np.testing.assert_array_equal(plan["owners"], np.arange(3) % count)
+                for i, result in enumerate(results):
+                    owned = np.flatnonzero(plan["owners"] == i)
+                    self.assertEqual(len(result[2]), len(owned))
+                    if not len(owned):
+                        self.assertEqual(result, (None, None, [], None))
+                    else:
+                        self.assertIn(plan["selected_indices"][i], owned)
+
+    def test_symmetric_trio_does_not_override_a_larger_asymmetric_team(self):
+        base = [np.array([0., y, 0.]) for y in [100., 0., -100.]]
+        for extras in ([[0., 250., 0.]], [[0., 100., 0.]],
+                       [[0., 250., 0.1], [0., -250., 0.]]):
+            with self.subTest(extras=extras):
+                robots = base + [np.array(pose) for pose in extras]
+                costs = np.full((len(robots), 5), 30.)
+                costs[0, 2], costs[1, 2] = 1., 9.
+                _, plan = recorded_plan(costs, selection_mode="slowest_symmetric",
+                                        robot_poses=robots)
+                self.assertEqual(plan["owners"][2], 0)
+                self.assertNotIn("symmetry", plan["selection_reasons"])
+
+    def test_symmetric_five_defender_team_keeps_midpoint_override(self):
+        robots = [np.array([0., y, 0.]) for y in [200., 100., 0., -100., -200.]]
+        costs = np.full((5, 5), 30.)
+        np.fill_diagonal(costs, 9.)
+        costs[0, 2] = 1.
+        _, plan = recorded_plan(costs, selection_mode="slowest_symmetric",
+                                robot_poses=robots)
+        self.assertEqual(plan["owners"][2], 2)
+        self.assertEqual(plan["selected_indices"][2], 2)
+        self.assertEqual(plan["selection_reasons"][2], "symmetry")
+
+    def test_snapshots_and_replay_display_any_team_size(self):
+        for count in (1, 2, 5, len(DEFENDER_COLORS) + 1):
+            with self.subTest(count=count):
+                times = np.arange(3) * 0.01
+                robots = [np.array([[0., 10. * i, 0.], [1., 10. * i, 0.],
+                                    [2., 10. * i, 0.]]) for i in range(count)]
+                ball = np.tile([1000., 0., np.pi], (3, 1))
+                ghosts = [np.tile([400., 10. * i, 0.], (3, 1)) for i in range(count)]
+                controls = [np.full(3, i + 0.25) for i in range(count)]
+                goal = np.array([0., 0., np.pi])
+
+                snapshots = plot_simulation(
+                    times, robots, ball, ghosts, [], goal[:2], None, show=False,
+                )
+                for ax in snapshots.axes:
+                    defender_lines = [line for line in ax.lines
+                                      if line.get_linewidth() == 2.2]
+                    self.assertEqual(len(defender_lines), count)
+                    for i, line in enumerate(defender_lines):
+                        self.assertEqual(line.get_color(),
+                                         DEFENDER_COLORS[i % len(DEFENDER_COLORS)])
+                self.assertIn(f"Defender {count}",
+                              [text.get_text() for text in snapshots.legends[0].get_texts()])
+
+                fig, animation = animate_simulation(
+                    times, robots, ball, ghosts, controls, goal, show=False,
+                )
+                slider = fig._simulation_widgets[0]
+                for frame in (2, 0, 1):
+                    slider.set_val(frame)
+                    trails = [line for line in fig.axes[0].lines
+                              if line.get_label().startswith("Defender ")
+                              and line.get_label().endswith(" trail")]
+                    self.assertEqual(len(trails), count)
+                    for i, trail in enumerate(trails):
+                        np.testing.assert_allclose(trail.get_xdata(), robots[i][:frame + 1, 0])
+                        np.testing.assert_allclose(trail.get_ydata(), robots[i][:frame + 1, 1])
+                    labels = ", ".join(f"D{i + 1}" for i in range(count))
+                    ranges = ", ".join(f"{np.linalg.norm(poses[frame, :2] - ball[frame, :2]):.1f}"
+                                       for poses in robots)
+                    control_text = ", ".join(f"{values[frame]:+.2f}" for values in controls)
+                    status = fig.texts[0].get_text()
+                    self.assertIn(f"range [{labels}]: [{ranges}] m", status)
+                    self.assertIn(f"normal accel [{labels}]: [{control_text}] m/s²", status)
+                animation.event_source.stop()
+                plt.close(fig)
 
     def test_modes_preserve_partition_and_choose_slowest_or_median(self):
         costs = [

@@ -22,8 +22,20 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
         plot_path="sim_assignment.png", verbose=True, goal_radius=10.0,
         selection_mode="slowest_symmetric", ball_policy="max_accel_pronav",
         ball_maneuver_duration=2.0, ball_turn_direction=1,
-        ball_navigation_constant=3.0):
-    """Run the simple three-defender simulation and return its recorded data.
+        ball_navigation_constant=3.0, robot_initial=None, *,
+        num_defenders=None, defender_start=(0., 0.), defender_spacing=100.):
+    """Run a defender-team simulation and return its recorded data.
+
+    Set ``num_defenders`` (default 3) and ``defender_start=(x, y)`` to generate
+    a vertical formation centered at that position. ``defender_spacing`` sets
+    the distance between neighbors (default 100 m, zero allowed). Generated
+    defenders face heading zero and are ordered from highest to lowest y.
+    ``robot_initial`` is a nonempty (N, 3) array-like of defender starting poses
+    ``[x, y, heading]``, with headings in radians, for individual positions and
+    headings instead of the generated formation. Its row count sets the team
+    size; an explicit ``num_defenders`` must match. All defenders share the same
+    speed and acceleration limit. Defender IDs in the results and plots follow
+    the input order, starting at 1.
 
     Long intruder detours are removed from a dynamic terminal-heading bank.
     The defenders jointly divide the remaining headings according to
@@ -57,6 +69,38 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
     if update_interval <= 0 or horizon < P.Ts or hit_radius <= 0 or goal_radius <= 0:
         raise ValueError("update_interval, hit_radius and goal_radius must be positive; "
                          "horizon must be at least P.Ts")
+    if num_defenders is not None and (
+            isinstance(num_defenders, (bool, np.bool_))
+            or not isinstance(num_defenders, (int, np.integer)) or num_defenders < 1):
+        raise ValueError("num_defenders must be a positive integer")
+    if robot_initial is None:
+        count = 3 if num_defenders is None else num_defenders
+        try:
+            start = np.asarray(defender_start, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("defender_start must be a finite (x, y) position") from exc
+        if start.shape != (2,) or not np.isfinite(start).all():
+            raise ValueError("defender_start must be a finite (x, y) position")
+        try:
+            spacing = np.asarray(defender_spacing, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("defender_spacing must be finite and nonnegative") from exc
+        if spacing.ndim != 0 or not np.isfinite(spacing) or spacing < 0:
+            raise ValueError("defender_spacing must be finite and nonnegative")
+        robot_initial = np.zeros((count, 3))
+        robot_initial[:, :2] = start
+        robot_initial[:, 1] += (0.5 * (count - 1) - np.arange(count)) * spacing
+    pose_error = ("robot_initial must be a nonempty (N, 3) array of finite "
+                  "[x, y, heading] poses")
+    try:
+        robot_initial = np.array(robot_initial, dtype=float, copy=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(pose_error) from exc
+    if (robot_initial.ndim != 2 or robot_initial.shape[0] == 0
+            or robot_initial.shape[1] != 3 or not np.isfinite(robot_initial).all()):
+        raise ValueError(pose_error)
+    if num_defenders is not None and len(robot_initial) != num_defenders:
+        raise ValueError("num_defenders must match the number of robot_initial poses")
 
     simulation_started = perf_counter()
 
@@ -65,9 +109,6 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
             print(message)
 
     ball_initial = np.array([1000., 0., np.pi])
-    robot_initial = [np.array([0., 100., 0.]),
-                     np.array([0., 0., 0.]),
-                     np.array([0., -100., 0.])]
     target = np.array([0., 0., terminal_heading])
     v_robot, v_ball = 30., 100.
     a_max_robot, a_max_ball = 2 * P.gravity, P.max_acceleration
@@ -280,10 +321,16 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
 
 
 if __name__ == "__main__":
+    num_defenders = 5
+    defender_start = (0., 0.)  # Formation center (x, y), in meters.
+    defender_spacing = 50.  # Distance between neighboring defenders, in meters.
+
     # sim(ball_maneuver_duration=2.0, ball_turn_direction=1, verbose=True,
     #     # selection_mode="slowest_symmetric")
     #     selection_mode="median")  # Or "median".
 
     sim(terminal_heading=np.radians(270), ball_policy="dubins", verbose=True,
+            num_defenders=num_defenders, defender_start=defender_start,
+            defender_spacing=defender_spacing,
             # selection_mode="slowest_symmetric")
             selection_mode="median")  # Or "median".

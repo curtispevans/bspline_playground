@@ -48,7 +48,8 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
                       final_time]
     indices = [min(np.searchsorted(times, instant), len(times) - 1)
                for instant in snapshot_times]
-    colors = DEFENDER_COLORS
+    colors = [DEFENDER_COLORS[i % len(DEFENDER_COLORS)]
+              for i in range(len(robot_poses))]
     snapshot_plans = [assignment_at_time(assignment_history, times[index])
                       for index in indices]
     fig, axes = plt.subplots(2, 2, figsize=(17, 11) if assignment_history else (15, 9),
@@ -190,8 +191,10 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     A fixed ``candidate_paths`` bank remains visible throughout playback and
     slider navigation, including paths beyond the end of the actual run.
     """
-    colors = DEFENDER_COLORS
-    labels = ("Defender 1", "Defender 2", "Defender 3")
+    colors = [DEFENDER_COLORS[i % len(DEFENDER_COLORS)]
+              for i in range(len(robot_poses))]
+    labels = [f"Defender {i + 1}" for i in range(len(robot_poses))]
+    defender_labels = ", ".join(f"D{i + 1}" for i in range(len(robot_poses)))
     n_frames = len(times)
     if n_frames == 0:
         print("No simulation frames were recorded.")
@@ -311,13 +314,12 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
         ball_marker.set_data([ball[0]], [ball[1]])
 
         robot_ball_ranges = [np.linalg.norm(poses[frame, :2] - ball[:2]) for poses in robot_poses]
+        range_text = ", ".join(f"{distance:.1f}" for distance in robot_ball_ranges)
         control_text = ", ".join(f"{values[frame]:+.2f}" for values in controls)
         status.set_text(
             f"t = {times[frame]:.2f} s    frame {frame + 1}/{n_frames}\n"
-            f"range [D1, D2, D3]: "
-            f"[{robot_ball_ranges[0]:.1f}, {robot_ball_ranges[1]:.1f}, "
-            f"{robot_ball_ranges[2]:.1f}] m    "
-            f"normal accel [D1, D2, D3]: [{control_text}] m/s²"
+            f"range [{defender_labels}]: [{range_text}] m\n"
+            f"normal accel [{defender_labels}]: [{control_text}] m/s²"
         )
         fig.canvas.draw_idle()
 

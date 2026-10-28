@@ -234,36 +234,44 @@ def _symmetric_center_robot_index(xi_robots0, x_ball0, ball_goal,
         return None
 
     poses = [np.asarray(pose, dtype=float) for pose in xi_robots0]
-    for center_i, center_pose in enumerate(poses):
-        center_delta = center_pose[:2] - ball_xy
-        if abs(np.dot(center_delta, normal)) > tol:
-            continue
-        # A heading on the symmetry axis is unchanged by reflection.
-        reflected_center_heading = 2 * theta_center - center_pose[2]
+
+    def is_reflection(first_pose, second_pose):
+        delta = first_pose[:2] - ball_xy
+        reflected_position = ball_xy + 2 * axis * np.dot(delta, axis) - delta
+        reflected_heading = 2 * theta_center - first_pose[2]
         heading_error = np.arctan2(
-            np.sin(reflected_center_heading - center_pose[2]),
-            np.cos(reflected_center_heading - center_pose[2]),
+            np.sin(reflected_heading - second_pose[2]),
+            np.cos(reflected_heading - second_pose[2]),
         )
-        if abs(heading_error) > tol:
+        return (np.allclose(reflected_position, second_pose[:2], atol=tol, rtol=0)
+                and abs(heading_error) <= tol)
+
+    # A symmetric trio is insufficient when the team contains other defenders.
+    # Match the entire formation, including the multiplicity of duplicate poses.
+    unmatched = set(range(len(poses)))
+    while unmatched:
+        first_i = min(unmatched)
+        unmatched.remove(first_i)
+        if is_reflection(poses[first_i], poses[first_i]):
+            continue
+        second_i = next((i for i in sorted(unmatched)
+                         if is_reflection(poses[first_i], poses[i])), None)
+        if second_i is None:
+            return None
+        unmatched.remove(second_i)
+
+    for center_i, center_pose in enumerate(poses):
+        if not is_reflection(center_pose, center_pose):
             continue
 
         for first_i in range(len(poses)):
             if first_i == center_i:
                 continue
-            first_delta = poses[first_i][:2] - ball_xy
-            reflected_position = ball_xy + 2 * axis * np.dot(first_delta, axis) - first_delta
-            reflected_heading = 2 * theta_center - poses[first_i][2]
             for second_i in range(len(poses)):
                 if second_i in (center_i, first_i):
                     continue
                 second_pose = poses[second_i]
-                heading_error = np.arctan2(
-                    np.sin(reflected_heading - second_pose[2]),
-                    np.cos(reflected_heading - second_pose[2]),
-                )
-                if (np.allclose(reflected_position, second_pose[:2],
-                                atol=tol, rtol=0) and
-                        abs(heading_error) <= tol):
+                if is_reflection(poses[first_i], second_pose):
                     midpoint = 0.5 * (poses[first_i][:2] + second_pose[:2])
                     if np.allclose(midpoint, center_pose[:2], atol=tol, rtol=0):
                         return center_i

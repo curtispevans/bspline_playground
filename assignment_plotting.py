@@ -7,7 +7,8 @@ from matplotlib.lines import Line2D
 from path_manager import dubins_state_at_time, get_dubins_parameters
 
 
-DEFENDER_COLORS = ("#d85140", "#147d65", "#4874b8")
+DEFENDER_COLORS = ("#d85140", "#147d65", "#4874b8", "#9467bd", "#e69525",
+                   "#8c564b", "#d76ba0", "#6c7a89", "#9b9b25", "#17a2b8")
 UNASSIGNED_COLOR = "#858585"
 
 
