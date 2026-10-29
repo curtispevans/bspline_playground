@@ -329,8 +329,8 @@ if __name__ == "__main__":
     #     # selection_mode="slowest_symmetric")
     #     selection_mode="median")  # Or "median".
 
-    sim(terminal_heading=np.radians(270), ball_policy="dubins", verbose=True,
+    sim(terminal_heading=np.radians(270), ball_policy="max_accel_pronav", verbose=True,
             num_defenders=num_defenders, defender_start=defender_start,
             defender_spacing=defender_spacing,
-            # selection_mode="slowest_symmetric")
+            ball_maneuver_duration=2.5,
             selection_mode="median")  # Or "median".
