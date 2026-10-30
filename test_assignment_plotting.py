@@ -1,12 +1,16 @@
 """Checks that plots display recorded planner decisions and replan timing."""
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import PillowWriter
+from PIL import Image, ImageChops
 
 from assignment_plotting import (DEFENDER_COLORS, UNASSIGNED_COLOR, assignment_at_time,
                                  assignment_summary, draw_assignment_costs,
@@ -44,6 +48,55 @@ def recorded_plan(costs, selection_mode="median", symmetric=True, robot_poses=No
 class AssignmentPlottingTests(unittest.TestCase):
     def tearDown(self):
         plt.close("all")
+
+    def test_gif_advances_recorded_frames_and_replans_without_widgets(self):
+        _, initial = recorded_plan([[1, 8, 8], [8, 1, 8], [8, 8, 1]])
+        _, refreshed = recorded_plan([[80, 80, 10], [80, 10, 80], [10, 80, 80]])
+        refreshed.update(time=0.05, effective_time=0.06)
+        times = np.arange(13) * 0.01
+        robots = [np.tile(pose, (len(times), 1)) for pose in initial["robot_poses"]]
+        ball = np.tile(initial["ball_pose"], (len(times), 1))
+        ball[:, 0] -= np.arange(len(times)) * 20.
+        ghosts = [np.full_like(poses, np.nan) for poses in robots]
+        controls = [np.zeros(len(times)) for _ in robots]
+        original_grab = PillowWriter.grab_frame
+
+        for speed, expected_times in [(1., [0., .05, .10, .12]), (2., [0., .10, .12])]:
+            with self.subTest(speed=speed), TemporaryDirectory() as directory:
+                path = Path(directory, "replay.gif")
+                statuses = []
+
+                def grab(writer, **kwargs):
+                    statuses.append(writer.fig.texts[0].get_text())
+                    self.assertTrue(all(not ax.get_visible() for ax in writer.fig.axes[-4:]))
+                    original_grab(writer, **kwargs)
+
+                with patch("plotting_animation.PillowWriter.grab_frame", autospec=True,
+                           side_effect=grab), \
+                        patch("plotting_animation.draw_assignment_paths",
+                              wraps=draw_assignment_paths) as draw:
+                    fig, animation = animate_simulation(
+                        times, robots, ball, ghosts, controls, initial["goal"],
+                        assignment_history=[initial, refreshed], show=False,
+                        gif_path=path, gif_fps=20, gif_speed=speed,
+                    )
+                self.assertEqual(len(statuses), len(expected_times))
+                for status, instant in zip(statuses, expected_times):
+                    self.assertTrue(status.startswith(f"t = {instant:.2f} s"))
+                self.assertEqual([id(call.args[1]) for call in draw.call_args_list],
+                                 [id(initial), id(refreshed), id(initial)])
+                with Image.open(path) as gif:
+                    self.assertEqual(gif.n_frames, len(expected_times))
+                    self.assertEqual(gif.info["loop"], 0)
+                    self.assertEqual(gif.info["duration"], 50)
+                    first = gif.convert("RGB")
+                    gif.seek(gif.n_frames - 1)
+                    self.assertIsNotNone(ImageChops.difference(first, gif.convert("RGB")).getbbox())
+                # Exporting also leaves the interactive replay ready at its start.
+                self.assertTrue(all(widget.ax.get_visible() for widget in fig._simulation_widgets))
+                self.assertEqual(fig._simulation_widgets[0].val, 0)
+                self.assertTrue(fig.texts[0].get_text().startswith("t = 0.00 s"))
+                animation.event_source.stop()
 
     def test_planner_partitions_headings_for_any_team_size(self):
         for count in (1, 2, 5, 12):

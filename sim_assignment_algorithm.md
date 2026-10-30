@@ -286,6 +286,23 @@ To display snapshots without saving, pass `plot_path=None`. To show only replay,
 pass `plot=False`. Interactive controls require an interactive Matplotlib backend
 and a plot window; an inline/static image cannot respond to replay controls.
 
+To export the same replay as a looping GIF without opening windows:
+
+```python
+sim(num_defenders=5, defender_spacing=50., ball_maneuver_duration=2.5,
+    selection_mode="median", plot=False, animate=False,
+    gif_path="sim_assignment_5_defenders.gif", gif_fps=20, gif_speed=1.)
+```
+
+The GIF includes the spatial view, recorded assignments, cost panel, and status
+readout, with the slider and buttons hidden. It samples simulation time at
+`gif_fps` frames per second and always includes the final recorded state.
+`gif_speed=1` plays at real time; use `2` for twice as fast or `0.5` for half
+speed. Export uses the Pillow GIF writer at 80 dpi, with no FFmpeg requirement.
+You can also pass these GIF options directly to `animate_simulation` when you
+already have recorded histories. Export time is included in
+`timing["animation_seconds"]`.
+
 Run `python3 intercept.py` to inspect the initial candidate envelope beside its
 cost curves, using the same defender numbering and formation as the simulation.
 Its final `test(selection_mode=...)` call offers the same two choices.

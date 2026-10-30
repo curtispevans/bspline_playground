@@ -11,6 +11,31 @@ from sim_assignment import sim
 
 
 class AssignmentSimulationTests(unittest.TestCase):
+    def test_gif_can_be_saved_without_opening_a_replay(self):
+        figure = object()
+        with patch("sim_assignment.get_cost_metrics",
+                   return_value=[(None, None, [], None)] * 3), \
+                patch("sim_assignment.animate_simulation", return_value=(figure, None)) as replay, \
+                patch("sim_assignment.plt.close") as close:
+            result = sim(plot=False, animate=False, verbose=False, horizon=P.Ts,
+                         gif_path="replay.gif", gif_fps=10, gif_speed=2.)
+        self.assertIsNone(result["replay"])
+        self.assertFalse(replay.call_args.kwargs["show"])
+        self.assertEqual(replay.call_args.kwargs["gif_path"], "replay.gif")
+        self.assertEqual(replay.call_args.kwargs["gif_fps"], 10)
+        self.assertEqual(replay.call_args.kwargs["gif_speed"], 2.)
+        close.assert_called_once_with(figure)
+
+    def test_invalid_gif_timing_is_rejected_before_planning(self):
+        for name in ("gif_fps", "gif_speed"):
+            for value in (0., -1., np.inf, np.nan):
+                with self.subTest(setting=name, value=value):
+                    with patch("sim_assignment.get_cost_metrics") as planner:
+                        with self.assertRaisesRegex(ValueError, name):
+                            sim(plot=False, animate=False, verbose=False, horizon=P.Ts,
+                                gif_path="replay.gif", **{name: value})
+                        planner.assert_not_called()
+
     def test_defender_count_and_start_generate_a_centered_formation(self):
         cases = [(1, [-20.]), (np.int64(2), [0., -40.]),
                  (4, [40., 0., -40., -80.]), (5, [60., 20., -20., -60., -100.])]

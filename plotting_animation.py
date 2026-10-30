@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.collections import LineCollection
 from matplotlib.widgets import Button, Slider
 
@@ -180,7 +180,8 @@ def plot_simulation(times, robot_poses, ball_poses, ghost_poses,
 
 
 def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, target,
-                       *, assignment_history=None, show=True, candidate_paths=None):
+                       *, assignment_history=None, show=True, candidate_paths=None,
+                       gif_path=None, gif_fps=20, gif_speed=1.0):
     """Show a replayable simulation with a frame slider and step controls.
 
     Use the slider or the left/right arrow keys to inspect individual frames.
@@ -190,6 +191,10 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     together when stepping across a replan.
     A fixed ``candidate_paths`` bank remains visible throughout playback and
     slider navigation, including paths beyond the end of the actual run.
+    ``gif_path`` exports the same replay without widgets, including the final
+    recorded frame. GIF playback follows simulation time at ``gif_fps`` frames
+    per second; ``gif_speed=2`` plays twice as fast. Set ``show=False`` to export
+    without opening a window. GIF output uses Pillow and requires no FFmpeg.
     """
     colors = [DEFENDER_COLORS[i % len(DEFENDER_COLORS)]
               for i in range(len(robot_poses))]
@@ -199,6 +204,16 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     if n_frames == 0:
         print("No simulation frames were recorded.")
         return None, None
+    gif_frames = None
+    if gif_path is not None:
+        if not np.isfinite(gif_fps) or gif_fps <= 0:
+            raise ValueError("gif_fps must be finite and positive")
+        if not np.isfinite(gif_speed) or gif_speed <= 0:
+            raise ValueError("gif_speed must be finite and positive")
+        times = np.asarray(times)
+        sample_times = np.arange(times[0], times[-1], gif_speed / gif_fps)
+        gif_frames = np.r_[np.searchsorted(times, sample_times, side="right") - 1,
+                           n_frames - 1]
     candidate_paths = ([] if candidate_paths is None else
                        [np.asarray(path) for path in candidate_paths])
 
@@ -246,8 +261,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
         ghost_markers.append(ghost)
 
     ax.plot(ball_poses[:, 0], ball_poses[:, 1], color="magenta", alpha=0.18, linewidth=1.5)
-    ball_trail, = ax.plot([], [], color="magenta", linewidth=2.0, label="Ball trail")
-    ball_marker, = ax.plot([], [], "o", color="magenta", markersize=9, label="Ball")
+    ball_trail, = ax.plot([], [], color="magenta", linewidth=2.0, label="Intruder trail")
+    ball_marker, = ax.plot([], [], "o", color="magenta", markersize=9, label="Intruder")
     status = fig.text(0.5, 0.215, "",
                     ha="center", va="center",
                     family="monospace", fontsize=8,
@@ -280,7 +295,7 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     state = {"frame": 0, "playing": False, "assignment": None}
     assignment_artists = []
 
-    def render(frame):
+    def render(frame, *, redraw=True):
         frame = int(np.clip(frame, 0, n_frames - 1))
         state["frame"] = frame
         plan = assignment_at_time(assignment_history, times[frame])
@@ -321,7 +336,8 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
             f"range [{defender_labels}]: [{range_text}] m\n"
             f"normal accel [{defender_labels}]: [{control_text}] m/s²"
         )
-        fig.canvas.draw_idle()
+        if redraw:
+            fig.canvas.draw_idle()
 
     def on_slider(value):
         render(value)
@@ -368,6 +384,30 @@ def animate_simulation(times, robot_poses, ball_poses, ghost_poses, controls, ta
     fig._simulation_widgets = (frame_slider, back_button, play_button, forward_button)
     fig._simulation_animation = animation
     render(0)
+    if gif_path is not None:
+        # Save explicit recorded frames: the interactive animation is paused
+        # until Play is clicked, so saving its timer callback would freeze it.
+        widget_axes = (slider_ax, back_ax, play_ax, forward_ax)
+        for widget_ax in widget_axes:
+            widget_ax.set_visible(False)
+        fig.subplots_adjust(bottom=0.16)
+        status.set_position((0.5, 0.07))
+        if not assignment_history:
+            ax.set_title("Defender and Intruder Simulation")
+        try:
+            writer = PillowWriter(fps=gif_fps)
+            with writer.saving(fig, str(gif_path), dpi=80):
+                for frame in gif_frames:
+                    render(frame, redraw=False)
+                    writer.grab_frame()
+        finally:
+            for widget_ax in widget_axes:
+                widget_ax.set_visible(True)
+            fig.subplots_adjust(bottom=0.30)
+            status.set_position((0.5, 0.215))
+            if not assignment_history:
+                ax.set_title("Defender and Intruder Simulation — replay controls below")
+            render(0)
     if show:
         plt.show()
     return fig, animation

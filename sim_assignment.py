@@ -2,6 +2,7 @@
 
 from time import perf_counter
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 import params as P
@@ -20,10 +21,11 @@ def _pose_for_history(pose):
 def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
         update_interval=0.5, horizon=100.0, hit_radius=10.0,
         plot_path="sim_assignment.png", verbose=True, goal_radius=10.0,
-        selection_mode="slowest_symmetric", ball_policy="max_accel_pronav",
+        selection_mode="median", ball_policy="max_accel_pronav",
         ball_maneuver_duration=2.0, ball_turn_direction=1,
         ball_navigation_constant=3.0, robot_initial=None, *,
-        num_defenders=None, defender_start=(0., 0.), defender_spacing=100.):
+        num_defenders=None, defender_start=(0., 0.), defender_spacing=100.,
+        gif_path=None, gif_fps=20, gif_speed=1.0):
     """Run a defender-team simulation and return its recorded data.
 
     Set ``num_defenders`` (default 3) and ``defender_start=(x, y)`` to generate
@@ -52,8 +54,11 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
     they do not receive the ball's actual maneuver duration or turn direction.
     Guidance switches to the moving ball inside the ball's minimum turn radius,
     or whenever the planner finds no ghost. Set ``plot=False, animate=False``
-    for runs without figures. ``plot_path=None`` displays snapshots without
-    saving them. See ``sim_assignment_algorithm.md`` for planning assumptions.
+    for runs without windows. ``gif_path`` saves the replay as a looping GIF,
+    even with ``animate=False``; ``gif_fps`` sets its frame rate and ``gif_speed``
+    its playback speed (1 = real time, 2 = twice as fast). ``plot_path=None``
+    displays snapshots without saving them. See ``sim_assignment_algorithm.md``
+    for planning assumptions.
     Wall-clock measurements are returned in ``timing`` and printed when
     verbose. Compute time excludes figures; display-call times include any
     wait for windows to close. ``timing['planning_seconds']`` contains the
@@ -101,6 +106,11 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
         raise ValueError(pose_error)
     if num_defenders is not None and len(robot_initial) != num_defenders:
         raise ValueError("num_defenders must match the number of robot_initial poses")
+    if gif_path is not None:
+        if not np.isfinite(gif_fps) or gif_fps <= 0:
+            raise ValueError("gif_fps must be finite and positive")
+        if not np.isfinite(gif_speed) or gif_speed <= 0:
+            raise ValueError("gif_speed must be finite and positive")
 
     simulation_started = perf_counter()
 
@@ -193,7 +203,7 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
         active_ghosts = []
         for robot, ghost in zip(robots, ghosts):
             direct_pn = (ghost is None or
-                         np.linalg.norm(robot.x[:2] - ball.x[:2]) < 1.25*ball_radius)
+                         np.linalg.norm(robot.x[:2] - ball.x[:2]) < 1*ball_radius)
             # Choose each robot's mode independently, at every control step.
             controls.append(pronav(
                 robot.x, ball.x if direct_pn else ghost, v_robot,
@@ -282,14 +292,21 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
             log(f"Saved snapshots to {plot_path}")
 
     replay = None
-    if animate:
+    if animate or gif_path is not None:
         animation_started = perf_counter()
-        replay = animate_simulation(
-            times, robot_poses, ball_poses, ghost_poses, controls, target,
-            assignment_history=assignment_history,
-        )
+        replay_options = {"assignment_history": assignment_history}
+        if gif_path is not None:
+            replay_options.update(show=animate, gif_path=gif_path,
+                                  gif_fps=gif_fps, gif_speed=gif_speed)
+        replay = animate_simulation(times, robot_poses, ball_poses, ghost_poses,
+                                    controls, target, **replay_options)
         timing["animation_seconds"] = perf_counter() - animation_started
-    if plot or animate:
+        if gif_path is not None:
+            log(f"Saved replay GIF to {gif_path}")
+        if not animate:
+            plt.close(replay[0])
+            replay = None
+    if plot or animate or gif_path is not None:
         log(f"Display calls: plot {timing['plot_seconds']:.3f} s, "
             f"animation {timing['animation_seconds']:.3f} s "
             "(includes time spent in open windows)")
@@ -321,9 +338,9 @@ def sim(animate=True, plot=True, terminal_heading=4.422615269729036,
 
 
 if __name__ == "__main__":
-    num_defenders = 5
+    num_defenders = 3
     defender_start = (0., 0.)  # Formation center (x, y), in meters.
-    defender_spacing = 50.  # Distance between neighboring defenders, in meters.
+    defender_spacing = 100.  # Distance between neighboring defenders, in meters.
 
     # sim(ball_maneuver_duration=2.0, ball_turn_direction=1, verbose=True,
     #     # selection_mode="slowest_symmetric")
@@ -332,5 +349,5 @@ if __name__ == "__main__":
     sim(terminal_heading=np.radians(270), ball_policy="max_accel_pronav", verbose=True,
             num_defenders=num_defenders, defender_start=defender_start,
             defender_spacing=defender_spacing,
-            ball_maneuver_duration=2.5,
-            selection_mode="median")  # Or "median".
+            ball_maneuver_duration=2.5, #)
+            gif_path="replay.gif", gif_fps=10, gif_speed=1.0)  # Or "median".
